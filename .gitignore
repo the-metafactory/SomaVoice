@@ -1,0 +1,4 @@
+.build/
+IvyVoice.app/
+*.xcodeproj
+.DS_Store
