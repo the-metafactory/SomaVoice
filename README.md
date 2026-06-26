@@ -99,6 +99,12 @@ skills and can tolerate the wait — or dispatch that work async to Cortex.
 
 ## Known limitations (prototype)
 
+- **Deep turns are slow** (~60–90s): when the router delegates a skill task
+  (email, calendar), deep pi explores the skill step-by-step from a cold spawn.
+  Not a hang — the app speaks a bridge then reassures every ~22s while it works,
+  and a watchdog caps it. Repeat calls in the same session are faster (skill
+  already loaded). Future: warm/persistent deep session, or stream pi's progress
+  to voice.
 - Fast brain needs `ANTHROPIC_API_KEY` in `~/.env` (separate from the
   subscription the CLI uses). Until added, use the Skilled toggle.
 - Fast brain has no Claude Code skills — personality only. Skill work belongs on

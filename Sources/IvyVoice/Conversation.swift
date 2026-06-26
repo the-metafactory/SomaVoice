@@ -54,6 +54,7 @@ final class Conversation: ObservableObject {
     private let skilledBrain = WarmBrain()
     private let stt = SpeechTranscriber()
     private var hotKey: ModifierHotKey?
+    private var deepReassure: Task<Void, Never>?
 
     private var brain: Brain {
         switch brainKind {
@@ -85,9 +86,9 @@ final class Conversation: ObservableObject {
             _ = await AudioRecorder.requestPermission()
             _ = await SpeechTranscriber.requestPermission()
         }
-        // Spoken bridge while the router escalates to deep Ivy.
+        // Spoken bridge + periodic reassurance while the router escalates to deep Ivy.
         routerBrain.onInterim = { [weak self] text in
-            Task { @MainActor in self?.speakInterim(text) }
+            Task { @MainActor in self?.beginDeepWait(text) }
         }
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
 
@@ -113,9 +114,24 @@ final class Conversation: ObservableObject {
         if state == .listening { stopAndProcess() }
     }
 
-    /// Speak the router's bridge line ("let me look into that") while deep Ivy
-    /// works — keeps the voice alive during the slow turn. Plays only if we're
-    /// still thinking (the real answer hasn't started yet).
+    /// Deep turns (skills/tools) can take 60-90s. Speak a bridge, then reassure
+    /// every ~22s so the silence never reads as a hang. Cancelled when the real
+    /// answer arrives (see stopAndProcess).
+    func beginDeepWait(_ bridge: String) {
+        speakInterim(bridge)
+        deepReassure?.cancel()
+        deepReassure = Task { @MainActor in
+            let lines = ["Still working on it.", "Almost there, hang on.", "Still on it, one moment."]
+            var i = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 22_000_000_000)
+                guard !Task.isCancelled, case .thinking = state else { break }
+                speakInterim(lines[i % lines.count]); i += 1
+            }
+        }
+    }
+
+    /// Speak a short line while still thinking — won't talk over the real answer.
     func speakInterim(_ text: String) {
         Task { @MainActor in
             guard case .thinking = state, let el = try? ElevenLabs(),
@@ -138,6 +154,7 @@ final class Conversation: ObservableObject {
     }
 
     private func startListening() {
+        deepReassure?.cancel() // barge-in cancels any pending deep wait
         player.stop() // barge-in
         do {
             try recorder.start()
@@ -163,6 +180,7 @@ final class Conversation: ObservableObject {
                 transcript.append(Turn(speaker: "You", text: heard))
 
                 let text = try await brain.ask(heard, persona: persona)
+                deepReassure?.cancel() // answer's here — stop reassuring
                 transcript.append(Turn(speaker: persona.name, text: text))
 
                 let mp3 = try await el.synthesize(text: text, voiceId: persona.voiceId)
@@ -173,6 +191,7 @@ final class Conversation: ObservableObject {
                     }
                 }
             } catch {
+                deepReassure?.cancel()
                 state = .error(error.localizedDescription)
             }
         }
