@@ -44,6 +44,8 @@ final class Conversation: ObservableObject {
     @Published var transcript: [Turn] = []
     @Published var persona: Persona = .ivy
     @Published var brainKind: BrainKind = .router
+    /// Hands-free back-and-forth: listen → respond → auto-listen, until toggled off.
+    @Published var conversationActive = false
 
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
@@ -55,6 +57,7 @@ final class Conversation: ObservableObject {
     private let stt = SpeechTranscriber()
     private var hotKey: ModifierHotKey?
     private var deepReassure: Task<Void, Never>?
+    private var vadTask: Task<Void, Never>?
 
     private var brain: Brain {
         switch brainKind {
@@ -92,12 +95,70 @@ final class Conversation: ObservableObject {
         }
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
 
-        // System-wide hold-to-talk: hold Control+Option from any app.
+        // System-wide hotkey: tap Control+Option to toggle hands-free conversation.
         if hotKey == nil {
             ModifierHotKey.requestAccessibility() // needed for the global monitor
             hotKey = ModifierHotKey(
-                onStart: { [weak self] in self?.holdStart() },
-                onStop: { [weak self] in self?.holdEnd() })
+                onStart: { [weak self] in self?.toggleConversation() },
+                onStop: {})
+        }
+    }
+
+    // MARK: - Conversation mode (hands-free)
+
+    /// Tap-toggle from the hotkey: start a back-and-forth session, or end it.
+    func toggleConversation() {
+        if conversationActive { stopConversation() } else { startConversation() }
+    }
+
+    private func startConversation() {
+        conversationActive = true
+        listenCycle()
+    }
+
+    private func stopConversation() {
+        conversationActive = false
+        vadTask?.cancel()
+        deepReassure?.cancel()
+        recorder.stop()
+        player.stop()
+        state = .idle
+    }
+
+    /// One hands-free listen: record with VAD, end on a pause, then process. If
+    /// no speech is heard, just listen again (stay online). The post-answer
+    /// relisten is wired in stopAndProcess's completion.
+    private func listenCycle() {
+        guard conversationActive else { return }
+        deepReassure?.cancel()
+        player.stop()
+        do { try recorder.start() } catch { state = .error(error.localizedDescription); return }
+        state = .listening
+
+        vadTask?.cancel()
+        vadTask = Task { @MainActor in
+            let dt = 0.1
+            let speechDB: Float = -30      // above this = speech
+            let silenceHang = 1.2          // pause that ends an utterance
+            let maxListen = 15.0
+            let noSpeechReset = 8.0        // re-listen if nothing said
+            var spoke = false, silence = 0.0, elapsed = 0.0
+
+            while !Task.isCancelled, case .listening = state {
+                try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
+                guard case .listening = state else { return }
+                elapsed += dt
+                let lvl = recorder.currentLevel()
+                if lvl > speechDB { spoke = true; silence = 0 } else if spoke { silence += dt }
+
+                if spoke, silence >= silenceHang { stopAndProcess(); return }
+                if spoke, elapsed >= maxListen { stopAndProcess(); return }
+                if !spoke, elapsed >= noSpeechReset {
+                    recorder.stop()
+                    if conversationActive { listenCycle() }   // keep waiting
+                    return
+                }
+            }
         }
     }
 
@@ -166,7 +227,7 @@ final class Conversation: ObservableObject {
 
     private func stopAndProcess() {
         guard let fileURL = recorder.stop() else {
-            state = .idle
+            idleOrRelisten()
             return
         }
         state = .thinking
@@ -176,7 +237,7 @@ final class Conversation: ObservableObject {
                 let el = try ElevenLabs()
                 let heard = try await stt.transcribe(fileURL: fileURL)
                 try? FileManager.default.removeItem(at: fileURL)
-                guard !heard.isEmpty else { state = .idle; return }
+                guard !heard.isEmpty else { idleOrRelisten(); return }
                 transcript.append(Turn(speaker: "You", text: heard))
 
                 let text = try await brain.ask(heard, persona: persona)
@@ -187,7 +248,9 @@ final class Conversation: ObservableObject {
                 state = .speaking
                 player.play(mp3) { [weak self] in
                     Task { @MainActor in
-                        if case .speaking = self?.state { self?.state = .idle }
+                        guard let self, case .speaking = self.state else { return }
+                        self.state = .idle
+                        if self.conversationActive { self.listenCycle() } // next turn
                     }
                 }
             } catch {
@@ -195,5 +258,10 @@ final class Conversation: ObservableObject {
                 state = .error(error.localizedDescription)
             }
         }
+    }
+
+    /// In conversation mode, keep the loop alive; otherwise go idle.
+    private func idleOrRelisten() {
+        if conversationActive { listenCycle() } else { state = .idle }
     }
 }

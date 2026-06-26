@@ -109,11 +109,14 @@ skills and can tolerate the wait — or dispatch that work async to Cortex.
   subscription the CLI uses). Until added, use the Skilled toggle.
 - Fast brain has no Claude Code skills — personality only. Skill work belongs on
   the Skilled brain or an async Cortex dispatch.
-- **Hold ⌃⌥ (Control+Option) anywhere to talk, release to send** — modifier-only
-  hold-to-talk via NSEvent `flagsChanged` monitoring. Plus click / Space inside
-  the popover. The global monitor needs **Accessibility permission** (System
-  Settings → Privacy & Security → Accessibility → enable IvyVoice); the app
-  prompts on first launch.
+- **Tap ⌃⌥ (Control+Option) anywhere to start/stop a hands-free conversation** —
+  Ivy listens, VAD ends each utterance on a ~1.2s pause, she responds, then
+  auto-listens for the next turn until you tap ⌃⌥ again. Plus Talk / Space inside
+  the popover for a single turn. The global hotkey needs **Accessibility
+  permission** (System Settings → Privacy & Security → Accessibility → enable
+  IvyVoice); the app prompts on first launch.
+- VAD thresholds (speech > −30 dBFS, 1.2s silence to end, 15s max) are starting
+  values — may need tuning to your mic/room.
 - "Others" ships with Ivy + Echo; Echo uses an ElevenLabs preset voice. Swap in
   the real cortex assistant voices and wire persona → cortex dispatch later.
 - STT needs macOS Dictation enabled. A local whisper.cpp fallback (you already

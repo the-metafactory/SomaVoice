@@ -26,8 +26,9 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(statusColor)
             transcriptView
+            conversationButton
             talkButton
-            Text("Hold ⌃⌥ (Control+Option) anywhere to talk, release to send. Or click / Space here.")
+            Text("Tap ⌃⌥ (Control+Option) anywhere to start/stop a conversation. Or Talk / Space for one turn.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             footer
@@ -81,6 +82,16 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private var conversationButton: some View {
+        Button(action: { convo.toggleConversation() }) {
+            Label(convo.conversationActive ? "Stop Conversation" : "Start Conversation",
+                  systemImage: convo.conversationActive ? "stop.circle.fill" : "waveform.circle.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .tint(convo.conversationActive ? .green : .accentColor)
     }
 
     private var talkButton: some View {

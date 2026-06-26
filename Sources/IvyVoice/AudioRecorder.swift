@@ -30,9 +30,17 @@ final class AudioRecorder: NSObject {
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
         ]
         let rec = try AVAudioRecorder(url: url, settings: settings)
+        rec.isMeteringEnabled = true   // for voice-activity detection
         rec.record()
         recorder = rec
         fileURL = url
+    }
+
+    /// Current input level in dBFS (-160 = silence, 0 = max). Used for VAD.
+    func currentLevel() -> Float {
+        guard let rec = recorder else { return -160 }
+        rec.updateMeters()
+        return rec.averagePower(forChannel: 0)
     }
 
     /// Stop and return the recorded file (nil if nothing usable was captured).
