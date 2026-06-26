@@ -95,8 +95,10 @@ skills and can tolerate the wait — or dispatch that work async to Cortex.
   subscription the CLI uses). Until added, use the Skilled toggle.
 - Fast brain has no Claude Code skills — personality only. Skill work belongs on
   the Skilled brain or an async Cortex dispatch.
-- Push-to-talk is in-window (menu-bar popover). A true global hotkey needs
-  Accessibility permission — not wired yet.
+- Push-to-talk works system-wide via **⌃⌥Space** (Carbon RegisterEventHotKey, no
+  Accessibility permission needed), plus click / Space inside the popover. If
+  ⌃⌥Space is already bound by another app, registration silently no-ops — tell me
+  and I'll rebind.
 - "Others" ships with Ivy + Echo; Echo uses an ElevenLabs preset voice. Swap in
   the real cortex assistant voices and wire persona → cortex dispatch later.
 - STT needs macOS Dictation enabled. A local whisper.cpp fallback (you already
@@ -106,5 +108,5 @@ skills and can tolerate the wait — or dispatch that work async to Cortex.
 
 - Stream API replies sentence-by-sentence into TTS for lower perceived latency.
 - Persona → Cortex dispatch envelope when a turn produces real work.
-- Global push-to-talk hotkey; earcons for listening/thinking states.
+- Earcons for listening/thinking states; configurable hotkey binding.
 - whisper.cpp STT fallback (no Dictation dependency, fully local).

@@ -27,7 +27,7 @@ struct ContentView: View {
                 .foregroundStyle(statusColor)
             transcriptView
             talkButton
-            Text("Push-to-talk: click or press Space. Talk again to interrupt.")
+            Text("Push-to-talk: ⌃⌥Space anywhere, or click / Space here. Talk again to interrupt.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             footer

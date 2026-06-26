@@ -50,6 +50,7 @@ final class Conversation: ObservableObject {
     private let openRouterBrain = OpenRouterBrain()
     private let skilledBrain = WarmBrain()
     private let stt = SpeechTranscriber()
+    private var hotKey: GlobalHotKey?
 
     private var brain: Brain {
         switch brainKind {
@@ -81,6 +82,11 @@ final class Conversation: ObservableObject {
             _ = await SpeechTranscriber.requestPermission()
         }
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
+
+        // System-wide push-to-talk: Control-Option-Space from any app.
+        if hotKey == nil {
+            hotKey = GlobalHotKey.controlOptionSpace { [weak self] in self?.toggleTalk() }
+        }
     }
 
     func setBrainKind(_ kind: BrainKind) {
