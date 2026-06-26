@@ -23,13 +23,15 @@ final class Conversation: ObservableObject {
     }
 
     enum BrainKind: String, CaseIterable, Identifiable {
-        case pi          // pi.dev agent — Soma projection of Ivy, ~7s, multi-provider
+        case router      // fast reflex + self-delegation to deep Ivy (skills/memory)
+        case pi          // pi.dev lean — Soma projection of Ivy, ~7s
         case fast        // Anthropic API — ~1-3s/turn, personality, no skills
         case openrouter  // OpenRouter API — any model, ~1-3s, personality, no skills
         case skilled     // warm claude (PAI) session — full skills, ~20s/turn
         var id: String { rawValue }
         var label: String {
             switch self {
+            case .router: return "Router (fast + deep)"
             case .pi: return "pi.dev lean (Soma Ivy)"
             case .fast: return "Fast (Anthropic)"
             case .openrouter: return "OpenRouter"
@@ -41,10 +43,11 @@ final class Conversation: ObservableObject {
     @Published var state: State = .idle
     @Published var transcript: [Turn] = []
     @Published var persona: Persona = .ivy
-    @Published var brainKind: BrainKind = .openrouter
+    @Published var brainKind: BrainKind = .router
 
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
+    private let routerBrain = RouterBrain()
     private let piBrain = PiBrain()
     private let fastBrain = ApiBrain()
     private let openRouterBrain = OpenRouterBrain()
@@ -54,6 +57,7 @@ final class Conversation: ObservableObject {
 
     private var brain: Brain {
         switch brainKind {
+        case .router: return routerBrain
         case .pi: return piBrain
         case .fast: return fastBrain
         case .openrouter: return openRouterBrain
@@ -81,6 +85,10 @@ final class Conversation: ObservableObject {
             _ = await AudioRecorder.requestPermission()
             _ = await SpeechTranscriber.requestPermission()
         }
+        // Spoken bridge while the router escalates to deep Ivy.
+        routerBrain.onInterim = { [weak self] text in
+            Task { @MainActor in self?.speakInterim(text) }
+        }
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
 
         // System-wide hold-to-talk: hold Control+Option from any app.
@@ -103,6 +111,18 @@ final class Conversation: ObservableObject {
     /// Chord released — send what was captured.
     func holdEnd() {
         if state == .listening { stopAndProcess() }
+    }
+
+    /// Speak the router's bridge line ("let me look into that") while deep Ivy
+    /// works — keeps the voice alive during the slow turn. Plays only if we're
+    /// still thinking (the real answer hasn't started yet).
+    func speakInterim(_ text: String) {
+        Task { @MainActor in
+            guard case .thinking = state, let el = try? ElevenLabs(),
+                  let mp3 = try? await el.synthesize(text: text, voiceId: persona.voiceId)
+            else { return }
+            if case .thinking = state { player.play(mp3) {} }
+        }
     }
 
     func setBrainKind(_ kind: BrainKind) {

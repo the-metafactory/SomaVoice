@@ -20,8 +20,16 @@ mic ──▶ Apple Speech (on-device STT) ──▶ text
                      ElevenLabs TTS (persona voice) ──▶ speaker
 ```
 
-Four selectable brains (toggle in the UI):
+Five selectable brains (toggle in the UI):
 
+- **Router (fast + deep)** — `RouterBrain`, default. One Ivy, two speeds. A fast
+  OpenRouter model answers directly (~2s) and routes itself via tools: `recall`
+  (fast read-only memory grep over `~/.claude` + Soma, returned inline) and
+  `delegate` (hand off to deep Ivy — full pi with skills/tools/memory). On
+  delegate it speaks a short bridge ("let me look into that") so the voice never
+  goes silent during the slow deep turn. System 1 / System 2. Needs
+  `OPENROUTER_API_KEY`. Validated: direct/recall/delegate routing + recall
+  round-trip.
 - **pi.dev lean (Soma Ivy)** — `PiBrain`. Spawns the `pi` agent stripped to a
   minimal context (`-ne -ns -nc -nt --thinking off`) with Soma-Ivy's identity
   injected as *static system text* from `~/.soma/profile/*.md` — not the heavy

@@ -20,6 +20,11 @@ import Foundation
 final class PiBrain: Brain {
     var model: String? = nil   // nil → pi's default provider; set for fast/local
 
+    /// lean = stripped minimal context (fast conversational Ivy).
+    /// full = extensions + skills + tools + context (deep Ivy, the escalation target).
+    let lean: Bool
+    init(lean: Bool = true) { self.lean = lean }
+
     func warmUp(_ persona: Persona) {
         Task.detached { [weak self] in
             // Ephemeral throwaway to pay the runtime cold start; no session.
@@ -32,24 +37,29 @@ final class PiBrain: Brain {
     }
 
     func ask(_ text: String, persona: Persona) async throws -> String {
-        var args = [
-            "-p", "--mode", "json",
-            "--session-id", "ivy-voice-\(persona.id)",
-            "-ne", "-ns", "-nc", "-nt", "--thinking", "off",
-            "--system-prompt",
-            "Spoken voice reply: one or two short, natural sentences. No markdown, no lists, no headers — your text is read aloud.",
-        ]
-        // Identity: Soma profile as static text if present, else the persona's own.
-        let somaFiles = Config.somaIdentityFiles
-        if persona.id == "ivy", !somaFiles.isEmpty {
-            for f in somaFiles { args.append(contentsOf: ["--append-system-prompt", f]) }
+        let voice = "Spoken voice reply: one or two short, natural sentences. No markdown, no lists, no headers — your text is read aloud."
+        var args = ["-p", "--mode", "json", "--session-id", "ivy-voice-\(lean ? "" : "deep-")\(persona.id)"]
+
+        if lean {
+            // Stripped to minimal context; identity injected as static Soma text.
+            args.append(contentsOf: ["-ne", "-ns", "-nc", "-nt", "--thinking", "off",
+                                     "--system-prompt", voice])
+            let somaFiles = Config.somaIdentityFiles
+            if persona.id == "ivy", !somaFiles.isEmpty {
+                for f in somaFiles { args.append(contentsOf: ["--append-system-prompt", f]) }
+            } else {
+                args.append(contentsOf: ["--append-system-prompt", persona.preamble])
+            }
         } else {
-            args.append(contentsOf: ["--append-system-prompt", persona.preamble])
+            // Full: pi's own Soma projection + skills + tools + context. Just nudge
+            // the output toward spoken form.
+            args.append(contentsOf: ["--append-system-prompt", voice])
         }
         if let model, !model.isEmpty { args.append(contentsOf: ["--model", model]) }
         args.append(text)
 
-        return parseAssistant(from: try await run(args: args))
+        // Deep turns can run skills/tools — give them more headroom.
+        return parseAssistant(from: try await run(args: args, timeout: lean ? 60 : 180))
     }
 
     /// Pull the final assistant text out of pi's JSON event stream.
