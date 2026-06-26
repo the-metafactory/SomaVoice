@@ -22,6 +22,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             brainPicker
+            if convo.brainKind == .router { deepPicker }
             Text(convo.state.label)
                 .font(.caption)
                 .foregroundStyle(statusColor)
@@ -52,6 +53,19 @@ struct ContentView: View {
 
     private var personaBinding: Binding<Persona> {
         Binding(get: { convo.persona }, set: { convo.switchPersona($0) })
+    }
+
+    private var deepPicker: some View {
+        HStack {
+            Text("Deep").font(.caption).foregroundStyle(.secondary)
+            Picker("Deep", selection: Binding(
+                get: { convo.deepSubstrate },
+                set: { convo.setDeepSubstrate($0) })) {
+                ForEach(Conversation.DeepSubstrate.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
     }
 
     private var brainPicker: some View {

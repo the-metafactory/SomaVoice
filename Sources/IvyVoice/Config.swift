@@ -70,6 +70,12 @@ enum Config {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? "pi"
     }
 
+    /// Path to the `codex` CLI binary.
+    static var codexPath: String {
+        let candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "\(NSHomeDirectory())/.local/bin/codex"]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? "codex"
+    }
+
     /// Working directory for the brain — `~/.claude` so the full PAI config
     /// (CLAUDE.md → Ivy identity, all skills) loads for every turn.
     static var brainWorkingDir: String { "\(NSHomeDirectory())/.claude" }

@@ -15,7 +15,8 @@ final class RouterBrain: Brain {
     private let maxHops = 4
 
     private let memory = MemoryIndex()
-    private let deep = PiBrain(lean: false)    // escalation target
+    /// Escalation target — swappable deep substrate (pi.dev / Codex / Claude Code).
+    var deep: Brain = PiBrain(lean: false)
 
     /// Spoken bridge while the deep tier works. Wired by Conversation to TTS.
     var onInterim: ((String) -> Void)?

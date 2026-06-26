@@ -30,6 +30,12 @@ Five selectable brains (toggle in the UI):
   goes silent during the slow deep turn. System 1 / System 2. Needs
   `OPENROUTER_API_KEY`. Validated: direct/recall/delegate routing + recall
   round-trip.
+  - **Deep substrate is selectable** (picker, shown when Router is active):
+    **pi.dev** (`PiBrain` full), **Codex** (`codex exec`, read-only sandbox), or
+    **Claude Code** (`WarmBrain`, full PAI skills). Soma projects Ivy into all
+    three. Note: Codex runs read-only-sandboxed, so it reads files/memory but
+    network tasks (email/calendar) won't run there — use pi.dev or Claude Code
+    for those.
 - **pi.dev lean (Soma Ivy)** — `PiBrain`. Spawns the `pi` agent stripped to a
   minimal context (`-ne -ns -nc -nt --thinking off`) with Soma-Ivy's identity
   injected as *static system text* from `~/.soma/profile/*.md` — not the heavy

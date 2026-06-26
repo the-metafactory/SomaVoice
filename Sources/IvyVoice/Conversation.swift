@@ -40,10 +40,27 @@ final class Conversation: ObservableObject {
         }
     }
 
+    /// Deep-thinking substrate the Router escalates to.
+    enum DeepSubstrate: String, CaseIterable, Identifiable {
+        case piDev, codex, claudeCode
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .piDev: return "pi.dev"
+            case .codex: return "Codex"
+            case .claudeCode: return "Claude Code"
+            }
+        }
+    }
+
     @Published var state: State = .idle
     @Published var transcript: [Turn] = []
     @Published var persona: Persona = .ivy
     @Published var brainKind: BrainKind = .router
+    @Published var deepSubstrate: DeepSubstrate =
+        DeepSubstrate(rawValue: UserDefaults.standard.string(forKey: "deepSubstrate") ?? "") ?? .piDev {
+        didSet { UserDefaults.standard.set(deepSubstrate.rawValue, forKey: "deepSubstrate") }
+    }
     /// Hands-free back-and-forth: listen → respond → auto-listen, until toggled off.
     @Published var conversationActive = false
 
@@ -67,6 +84,9 @@ final class Conversation: ObservableObject {
     private let fastBrain = ApiBrain()
     private let openRouterBrain = OpenRouterBrain()
     private let skilledBrain = WarmBrain()
+    // Deep substrates the router can escalate to.
+    private let deepPi = PiBrain(lean: false)
+    private let deepCodex = CodexBrain()
     private let stt = SpeechTranscriber()
     private var hotKey: ModifierHotKey?
     private var deepReassure: Task<Void, Never>?
@@ -106,6 +126,7 @@ final class Conversation: ObservableObject {
         routerBrain.onInterim = { [weak self] text in
             Task { @MainActor in self?.beginDeepWait(text) }
         }
+        routerBrain.deep = currentDeep() // honor the persisted deep substrate
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
 
         // System-wide hotkey: tap Control+Option to toggle hands-free conversation.
@@ -217,6 +238,20 @@ final class Conversation: ObservableObject {
     func setBrainKind(_ kind: BrainKind) {
         brainKind = kind
         brain.warmUp(persona)
+    }
+
+    /// The Router's escalation target for the current deep-substrate setting.
+    private func currentDeep() -> Brain {
+        switch deepSubstrate {
+        case .piDev: return deepPi
+        case .codex: return deepCodex
+        case .claudeCode: return skilledBrain
+        }
+    }
+
+    func setDeepSubstrate(_ s: DeepSubstrate) {
+        deepSubstrate = s
+        routerBrain.deep = currentDeep()
     }
 
     func switchPersona(_ p: Persona) {
