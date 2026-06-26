@@ -97,6 +97,13 @@ final class PiBrain: Brain {
             // Resume exactly once — whichever fires first (exit or timeout).
             let once = ResumeOnce(cont)
 
+            // CRITICAL: drain stdout/stderr CONTINUOUSLY. Full pi streams a flood
+            // of events; if we only read at termination the 64KB pipe buffer fills,
+            // pi blocks on write, and the process never exits → deadlock.
+            let sink = PipeSink()
+            outPipe.fileHandleForReading.readabilityHandler = { sink.appendOut($0.availableData) }
+            errPipe.fileHandleForReading.readabilityHandler = { sink.appendErr($0.availableData) }
+
             // Watchdog: never let the UI spin on "thinking" forever.
             let killer = DispatchWorkItem {
                 proc.terminate()
@@ -107,10 +114,11 @@ final class PiBrain: Brain {
 
             proc.terminationHandler = { p in
                 killer.cancel()
-                let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                outPipe.fileHandleForReading.readabilityHandler = nil
+                errPipe.fileHandleForReading.readabilityHandler = nil
+                let (out, err) = sink.drainRemaining(outPipe, errPipe)
                 // Surface auth/config failures instead of returning an empty turn.
-                if p.terminationStatus != 0, !err.isEmpty {
+                if p.terminationStatus != 0, !err.isEmpty, out.isEmpty {
                     once.resume(.failure(NSError(domain: "PiBrain", code: Int(p.terminationStatus),
                         userInfo: [NSLocalizedDescriptionKey: String(err.prefix(200))])))
                 } else {
@@ -119,6 +127,26 @@ final class PiBrain: Brain {
             }
             do { try proc.run() } catch { once.resume(.failure(error)) }
         }
+    }
+}
+
+/// Thread-safe accumulator for a process's stdout/stderr, drained continuously
+/// from the readabilityHandler so the pipe buffer never fills.
+private final class PipeSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var out = Data()
+    private var err = Data()
+    func appendOut(_ d: Data) { guard !d.isEmpty else { return }; lock.lock(); out.append(d); lock.unlock() }
+    func appendErr(_ d: Data) { guard !d.isEmpty else { return }; lock.lock(); err.append(d); lock.unlock() }
+    /// Pull any bytes still buffered after exit, then return both streams as text.
+    func drainRemaining(_ outPipe: Pipe, _ errPipe: Pipe) -> (String, String) {
+        let oRest = outPipe.fileHandleForReading.readDataToEndOfFile()
+        let eRest = errPipe.fileHandleForReading.readDataToEndOfFile()
+        lock.lock(); out.append(oRest); err.append(eRest)
+        let o = String(data: out, encoding: .utf8) ?? ""
+        let e = String(data: err, encoding: .utf8) ?? ""
+        lock.unlock()
+        return (o, e)
     }
 }
 
