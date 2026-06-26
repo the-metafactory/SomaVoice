@@ -22,14 +22,43 @@ final class Conversation: ObservableObject {
         }
     }
 
+    enum BrainKind: String, CaseIterable, Identifiable {
+        case pi          // pi.dev agent — Soma projection of Ivy, ~7s, multi-provider
+        case fast        // Anthropic API — ~1-3s/turn, personality, no skills
+        case openrouter  // OpenRouter API — any model, ~1-3s, personality, no skills
+        case skilled     // warm claude (PAI) session — full skills, ~20s/turn
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .pi: return "pi.dev (Soma Ivy)"
+            case .fast: return "Fast (Anthropic)"
+            case .openrouter: return "OpenRouter"
+            case .skilled: return "Skilled (PAI)"
+            }
+        }
+    }
+
     @Published var state: State = .idle
     @Published var transcript: [Turn] = []
     @Published var persona: Persona = .ivy
+    @Published var brainKind: BrainKind = .pi
 
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
-    private let brain = ClaudeBrain()
+    private let piBrain = PiBrain()
+    private let fastBrain = ApiBrain()
+    private let openRouterBrain = OpenRouterBrain()
+    private let skilledBrain = WarmBrain()
     private let stt = SpeechTranscriber()
+
+    private var brain: Brain {
+        switch brainKind {
+        case .pi: return piBrain
+        case .fast: return fastBrain
+        case .openrouter: return openRouterBrain
+        case .skilled: return skilledBrain
+        }
+    }
 
     /// Push-to-talk toggle. First press starts listening (barge-in: cuts off any
     /// current speech). Second press stops and runs the turn.
@@ -51,12 +80,20 @@ final class Conversation: ObservableObject {
             _ = await AudioRecorder.requestPermission()
             _ = await SpeechTranscriber.requestPermission()
         }
+        // Only the skilled (CLI) brain has a costly spawn worth pre-warming.
+        if brainKind == .skilled { skilledBrain.warmUp(persona) }
+    }
+
+    func setBrainKind(_ kind: BrainKind) {
+        brainKind = kind
+        if kind == .skilled { skilledBrain.warmUp(persona) }
     }
 
     func switchPersona(_ p: Persona) {
         persona = p
         player.stop()
         state = .idle
+        if brainKind == .skilled { skilledBrain.warmUp(p) }
     }
 
     private func startListening() {
@@ -84,8 +121,7 @@ final class Conversation: ObservableObject {
                 guard !heard.isEmpty else { state = .idle; return }
                 transcript.append(Turn(speaker: "You", text: heard))
 
-                let reply = try await brain.ask(heard, persona: persona)
-                let text = reply.text.isEmpty ? "(no reply)" : reply.text
+                let text = try await brain.ask(heard, persona: persona)
                 transcript.append(Turn(speaker: persona.name, text: text))
 
                 let mp3 = try await el.synthesize(text: text, voiceId: persona.voiceId)

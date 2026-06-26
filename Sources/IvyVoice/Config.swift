@@ -29,6 +29,10 @@ enum Config {
 
     static var elevenLabsKey: String? { value("ELEVENLABS_API_KEY") }
 
+    static var anthropicKey: String? { value("ANTHROPIC_API_KEY") }
+
+    static var openRouterKey: String? { value("OPENROUTER_API_KEY") }
+
     /// Default (Ivy) voice id — `~/.env` first, then DA_IDENTITY fallback.
     static var ivyVoiceId: String {
         value("ELEVENLABS_VOICE_ID") ?? "s3TPKV1kjDlVtZbl4Ksh"
@@ -43,6 +47,12 @@ enum Config {
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
             ?? "claude"
+    }
+
+    /// Path to the `pi` (pi.dev) CLI binary.
+    static var piPath: String {
+        let candidates = ["/opt/homebrew/bin/pi", "/usr/local/bin/pi", "\(NSHomeDirectory())/.local/bin/pi"]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? "pi"
     }
 
     /// Working directory for the brain — `~/.claude` so the full PAI config

@@ -21,6 +21,7 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+            brainPicker
             Text(convo.state.label)
                 .font(.caption)
                 .foregroundStyle(statusColor)
@@ -49,6 +50,19 @@ struct ContentView: View {
 
     private var personaBinding: Binding<Persona> {
         Binding(get: { convo.persona }, set: { convo.switchPersona($0) })
+    }
+
+    private var brainPicker: some View {
+        HStack {
+            Text("Brain").font(.caption).foregroundStyle(.secondary)
+            Picker("Brain", selection: Binding(
+                get: { convo.brainKind },
+                set: { convo.setBrainKind($0) })) {
+                ForEach(Conversation.BrainKind.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+        }
     }
 
     private var transcriptView: some View {
