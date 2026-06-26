@@ -41,7 +41,7 @@ final class Conversation: ObservableObject {
     @Published var state: State = .idle
     @Published var transcript: [Turn] = []
     @Published var persona: Persona = .ivy
-    @Published var brainKind: BrainKind = .pi
+    @Published var brainKind: BrainKind = .fast
 
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
