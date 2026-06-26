@@ -13,7 +13,7 @@ struct Persona: Identifiable, Hashable {
     static let ivy = Persona(
         id: "ivy",
         name: "Ivy",
-        voiceId: Config.ivyVoiceId,
+        voiceId: "W04kEngIVSCZFB9K7BeC",
         preamble: """
         You are Ivy, speaking out loud over a voice interface. Keep replies short, \
         conversational, and natural — one or two sentences unless asked for more. \
