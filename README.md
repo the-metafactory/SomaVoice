@@ -118,6 +118,11 @@ skills and can tolerate the wait — or dispatch that work async to Cortex.
   subscription the CLI uses). Until added, use the Skilled toggle.
 - Fast brain has no Claude Code skills — personality only. Skill work belongs on
   the Skilled brain or an async Cortex dispatch.
+- **Wake word (optional, always-on)** — toggle it on and say your phrase (default
+  "hey ivy") to start a conversation hands-free. "Learn phrase" records you saying
+  it once and stores the transcript as the phrase. Uses continuous on-device
+  `SFSpeechRecognizer` (needs Dictation enabled; holds the mic while idle). Say
+  "stop" / "das war's" to end a conversation by voice.
 - **Tap ⌃⌥ (Control+Option) anywhere to start/stop a hands-free conversation** —
   Ivy listens, VAD ends each utterance on a ~1.2s pause, she responds, then
   auto-listens for the next turn until you tap ⌃⌥ again. Plus Talk / Space inside

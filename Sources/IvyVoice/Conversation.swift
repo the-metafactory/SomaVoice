@@ -68,7 +68,16 @@ final class Conversation: ObservableObject {
         }
     }
 
-    @Published var state: State = .idle
+    @Published var state: State = .idle {
+        didSet {
+            // Wake listener owns the mic only while fully idle.
+            if case .idle = state {
+                if wakeEnabled, !conversationActive { startWake() }
+            } else {
+                wakeListener.stop()
+            }
+        }
+    }
     @Published var transcript: [Turn] = []
     @Published var persona: Persona = .ivy
     @Published var brainKind: BrainKind = .router
@@ -79,6 +88,13 @@ final class Conversation: ObservableObject {
     @Published var sttLanguage: SttLanguage =
         SttLanguage(rawValue: UserDefaults.standard.string(forKey: "sttLanguage") ?? "") ?? .enUS {
         didSet { UserDefaults.standard.set(sttLanguage.rawValue, forKey: "sttLanguage") }
+    }
+    /// Always-on wake word (continuous on-device Speech).
+    @Published var wakeEnabled = UserDefaults.standard.bool(forKey: "wakeEnabled") {
+        didSet { UserDefaults.standard.set(wakeEnabled, forKey: "wakeEnabled") }
+    }
+    @Published var wakePhrase = UserDefaults.standard.string(forKey: "wakePhrase") ?? "hey ivy" {
+        didSet { UserDefaults.standard.set(wakePhrase, forKey: "wakePhrase") }
     }
     /// Hands-free back-and-forth: listen → respond → auto-listen, until toggled off.
     @Published var conversationActive = false
@@ -110,6 +126,7 @@ final class Conversation: ObservableObject {
     private var hotKey: ModifierHotKey?
     private var deepReassure: Task<Void, Never>?
     private var vadTask: Task<Void, Never>?
+    private lazy var wakeListener = WakeListener { [weak self] in self?.onWakeDetected() }
 
     private var brain: Brain {
         switch brainKind {
@@ -140,6 +157,7 @@ final class Conversation: ObservableObject {
         Task {
             _ = await AudioRecorder.requestPermission()
             _ = await SpeechTranscriber.requestPermission()
+            startWake()   // begin always-on listening if it's enabled
         }
         // Spoken bridge + periodic reassurance while the router escalates to deep Ivy.
         routerBrain.onInterim = { [weak self] text in
@@ -165,8 +183,49 @@ final class Conversation: ObservableObject {
     }
 
     private func startConversation() {
+        wakeListener.stop()        // conversation owns the mic now
         conversationActive = true
         listenCycle()
+    }
+
+    // MARK: - Wake word
+
+    private func onWakeDetected() {
+        guard !conversationActive else { return }
+        startConversation()
+    }
+
+    /// Start the always-on listener (idempotent; only when enabled and idle).
+    private func startWake() {
+        guard wakeEnabled, !conversationActive, !wakeListener.isRunning else { return }
+        wakeListener.phrase = wakePhrase
+        wakeListener.localeID = sttLanguage.rawValue
+        wakeListener.start()
+    }
+
+    func setWakeEnabled(_ on: Bool) {
+        wakeEnabled = on
+        if on { startWake() } else { wakeListener.stop() }
+    }
+
+    /// "Learn" the wake phrase: record ~2.5s, transcribe, store it.
+    func learnWakePhrase() {
+        wakeListener.stop()
+        state = .listening
+        Task { @MainActor in
+            do {
+                try recorder.start()
+                try await Task.sleep(nanoseconds: 2_500_000_000)
+                guard let url = recorder.stop() else { state = .idle; return }
+                let p = try await stt.transcribe(fileURL: url, localeID: sttLanguage.rawValue)
+                try? FileManager.default.removeItem(at: url)
+                let clean = p.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !clean.isEmpty { wakePhrase = clean }
+                state = .idle  // didSet restarts wake if enabled
+            } catch {
+                state = .error(error.localizedDescription)
+            }
+        }
     }
 
     private func stopConversation() {

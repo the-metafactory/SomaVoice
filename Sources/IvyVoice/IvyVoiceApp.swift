@@ -32,6 +32,7 @@ struct ContentView: View {
             Text("Tap ⌃⌥ (Control+Option) anywhere to start/stop a conversation. Or Talk / Space for one turn.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            wakeControls
             tuning
             footer
         }
@@ -125,6 +126,20 @@ struct ContentView: View {
         .controlSize(.large)
         .keyboardShortcut(.space, modifiers: [])
         .tint(convo.state == .listening ? .red : .accentColor)
+    }
+
+    private var wakeControls: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Toggle("Wake word", isOn: Binding(
+                    get: { convo.wakeEnabled }, set: { convo.setWakeEnabled($0) }))
+                    .font(.caption).toggleStyle(.switch).controlSize(.mini)
+                Spacer()
+                Button("Learn phrase") { convo.learnWakePhrase() }.font(.caption2)
+            }
+            Text("Say “\(convo.wakePhrase)” to wake. Learn = say your phrase once (2.5s).")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
     }
 
     private var tuning: some View {
