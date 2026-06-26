@@ -55,6 +55,15 @@ enum Config {
             ?? "claude"
     }
 
+    /// Soma identity files (portable Ivy/principal context as static markdown).
+    /// Injected as system text so lean pi stays authentic without the heavy
+    /// live soma extension. Returns only the files that exist.
+    static var somaIdentityFiles: [String] {
+        ["assistant.md", "principal.md", "purpose.md"]
+            .map { "\(NSHomeDirectory())/.soma/profile/\($0)" }
+            .filter { FileManager.default.fileExists(atPath: $0) }
+    }
+
     /// Path to the `pi` (pi.dev) CLI binary.
     static var piPath: String {
         let candidates = ["/opt/homebrew/bin/pi", "/usr/local/bin/pi", "\(NSHomeDirectory())/.local/bin/pi"]

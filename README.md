@@ -22,12 +22,13 @@ mic ──▶ Apple Speech (on-device STT) ──▶ text
 
 Four selectable brains (toggle in the UI):
 
-- **pi.dev (Soma Ivy)** — `PiBrain`, default. Spawns the `pi` agent CLI, which
-  Soma projects Ivy into (`~/.pi/agent/extensions/soma.ts`). This is *the Soma
-  projection of Ivy* — the portable identity itself, not a re-typed prompt — and
-  pi routes to any provider (OpenRouter, local Ollama, Codex). Memory across
-  turns via a per-persona `--session-id`. Measured ~7s/turn (validated:
-  identity + memory both work). Uses pi's own provider config; no extra key.
+- **pi.dev lean (Soma Ivy)** — `PiBrain`. Spawns the `pi` agent stripped to a
+  minimal context (`-ne -ns -nc -nt --thinking off`) with Soma-Ivy's identity
+  injected as *static system text* from `~/.soma/profile/*.md` — not the heavy
+  live soma extension. Still the Soma projection of Ivy, but **~1.5-3s warm**
+  (vs ~11.7s for full pi). Pre-warmed at launch to absorb pi's cold start.
+  Memory via per-persona `--session-id`. Routes to any provider (OpenRouter,
+  local Ollama, Codex); no extra key. Validated: identity + memory + latency.
 - **Fast (Anthropic)** — `ApiBrain`, raw Messages API (Haiku), prompt-cached
   system prompt. ~1-3s/turn. Personality only, no skills. Needs
   `ANTHROPIC_API_KEY`.

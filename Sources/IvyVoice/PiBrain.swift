@@ -1,31 +1,55 @@
 import Foundation
 
-/// pi.dev brain: spawns the `pi` agent CLI, which Soma projects Ivy into
-/// (~/.pi/agent/extensions/soma.ts). So this is *the Soma projection of Ivy* —
-/// the same portable identity, not a re-typed system prompt — and pi routes to
-/// any provider (OpenRouter, local Ollama, Codex), so it subsumes the OpenRouter
-/// path while staying provider-flexible.
+/// Lean pi.dev brain: the `pi` agent stripped to a minimal initial context, with
+/// Soma-Ivy's identity injected as *static system text* (from ~/.soma/profile)
+/// instead of the heavy live soma extension + algorithm.
 ///
-/// Measured ~7s/turn cold (vs ~24s for the PAI `claude` harness): pi is a
-/// lighter agent. Memory across turns via a stable per-persona `--session-id`.
-/// Set `model` to override pi's default (e.g. "ollama/gemma4" for fully local,
-/// "openrouter/anthropic/claude-fable-latest" for hosted).
+/// Measured: full pi ~11.7s, lean+live-extension ~6.6s, **lean+static-identity
+/// ~2.8s warm** — competitive with the direct APIs while still being the Soma
+/// projection of Ivy. The lean flags:
+///   -ne  no extension discovery (drops soma-algorithm + others)
+///   -ns  no skills
+///   -nc  no AGENTS.md/CLAUDE.md context
+///   -nt  no tools (it's a conversation, not a coding run)
+///   --thinking off
+/// Identity comes from --append-system-prompt on the compact Soma profile files;
+/// memory from a per-persona --session-id.
+///
+/// First spawn pays pi's ~10s runtime cold start; `warmUp` fires a throwaway at
+/// launch so the first real turn is fast.
 final class PiBrain: Brain {
-    var model: String? = nil   // nil → pi's own default (Soma config)
+    var model: String? = nil   // nil → pi's default provider; set for fast/local
 
-    func warmUp(_ persona: Persona) { /* spawn-per-turn; nothing to pre-warm */ }
+    func warmUp(_ persona: Persona) {
+        Task.detached { [weak self] in
+            // Ephemeral throwaway to pay the runtime cold start; no session.
+            _ = try? await self?.run(args: [
+                "-p", "--mode", "json", "--no-session",
+                "-ne", "-ns", "-nc", "-nt", "--thinking", "off",
+                "hi",
+            ])
+        }
+    }
 
     func ask(_ text: String, persona: Persona) async throws -> String {
         var args = [
-            "-p",
-            "--mode", "json",
+            "-p", "--mode", "json",
             "--session-id", "ivy-voice-\(persona.id)",
+            "-ne", "-ns", "-nc", "-nt", "--thinking", "off",
+            "--system-prompt",
+            "Spoken voice reply: one or two short, natural sentences. No markdown, no lists, no headers — your text is read aloud.",
         ]
+        // Identity: Soma profile as static text if present, else the persona's own.
+        let somaFiles = Config.somaIdentityFiles
+        if persona.id == "ivy", !somaFiles.isEmpty {
+            for f in somaFiles { args.append(contentsOf: ["--append-system-prompt", f]) }
+        } else {
+            args.append(contentsOf: ["--append-system-prompt", persona.preamble])
+        }
         if let model, !model.isEmpty { args.append(contentsOf: ["--model", model]) }
         args.append(text)
 
-        let out = try await run(args: args)
-        return parseAssistant(from: out)
+        return parseAssistant(from: try await run(args: args))
     }
 
     /// Pull the final assistant text out of pi's JSON event stream.

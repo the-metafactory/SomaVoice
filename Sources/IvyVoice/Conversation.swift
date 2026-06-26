@@ -30,7 +30,7 @@ final class Conversation: ObservableObject {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .pi: return "pi.dev (Soma Ivy)"
+            case .pi: return "pi.dev lean (Soma Ivy)"
             case .fast: return "Fast (Anthropic)"
             case .openrouter: return "OpenRouter"
             case .skilled: return "Skilled (PAI)"
@@ -80,20 +80,19 @@ final class Conversation: ObservableObject {
             _ = await AudioRecorder.requestPermission()
             _ = await SpeechTranscriber.requestPermission()
         }
-        // Only the skilled (CLI) brain has a costly spawn worth pre-warming.
-        if brainKind == .skilled { skilledBrain.warmUp(persona) }
+        brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
     }
 
     func setBrainKind(_ kind: BrainKind) {
         brainKind = kind
-        if kind == .skilled { skilledBrain.warmUp(persona) }
+        brain.warmUp(persona)
     }
 
     func switchPersona(_ p: Persona) {
         persona = p
         player.stop()
         state = .idle
-        if brainKind == .skilled { skilledBrain.warmUp(p) }
+        brain.warmUp(p)
     }
 
     private func startListening() {
