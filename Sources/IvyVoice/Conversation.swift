@@ -126,6 +126,7 @@ final class Conversation: ObservableObject {
     private var hotKey: ModifierHotKey?
     private var deepReassure: Task<Void, Never>?
     private var vadTask: Task<Void, Never>?
+    private var turnSeq = 0   // bumped per listen and on stop/barge-in; gates stale deep answers
     private lazy var wakeListener = WakeListener { [weak self] in self?.onWakeDetected() }
 
     private var brain: Brain {
@@ -230,6 +231,7 @@ final class Conversation: ObservableObject {
 
     private func stopConversation() {
         conversationActive = false
+        turnSeq += 1   // invalidate any in-flight deep turn
         vadTask?.cancel()
         deepReassure?.cancel()
         recorder.stop()
@@ -242,6 +244,7 @@ final class Conversation: ObservableObject {
     /// relisten is wired in stopAndProcess's completion.
     private func listenCycle() {
         guard conversationActive else { return }
+        turnSeq += 1
         deepReassure?.cancel()
         player.stop()
         do { try recorder.start() } catch { state = .error(error.localizedDescription); return }
@@ -340,6 +343,7 @@ final class Conversation: ObservableObject {
     }
 
     private func startListening() {
+        turnSeq += 1           // invalidate any in-flight turn (barge-in)
         deepReassure?.cancel() // barge-in cancels any pending deep wait
         player.stop() // barge-in
         do {
@@ -357,10 +361,12 @@ final class Conversation: ObservableObject {
         }
         state = .thinking
         let persona = self.persona
+        let token = turnSeq   // this turn; stop/barge-in bumps turnSeq to invalidate
         Task {
             do {
                 let el = try ElevenLabs()
                 let heard = try await stt.transcribe(fileURL: fileURL, localeID: sttLanguage.rawValue)
+                guard token == turnSeq else { return }  // superseded (stopped / new turn)
                 try? FileManager.default.removeItem(at: fileURL)
                 guard !heard.isEmpty else { idleOrRelisten(); return }
                 transcript.append(Turn(speaker: "You", text: heard))
@@ -375,6 +381,7 @@ final class Conversation: ObservableObject {
 
                 let text = try await brain.ask(heard, persona: persona)
                 deepReassure?.cancel() // answer's here — stop reassuring
+                guard token == turnSeq else { return }  // stopped/barged while deep ran
                 transcript.append(Turn(speaker: persona.name, text: text))
 
                 let mp3 = try await el.synthesize(text: text, voiceId: persona.voiceId)
@@ -388,7 +395,32 @@ final class Conversation: ObservableObject {
                 }
             } catch {
                 deepReassure?.cancel()
-                state = .error(error.localizedDescription)
+                guard token == turnSeq else { return }  // stopped/barged — stay stopped
+                transcript.append(Turn(speaker: persona.name, text: "Sorry — that didn't go through."))
+                // Never strand the loop: in a conversation keep listening; otherwise
+                // go idle (which restarts the wake listener if enabled). A sticky
+                // .error here was killing voice after a flaky deep turn.
+                if conversationActive {
+                    try? await speakAndRelisten("Sorry, that didn't go through.")
+                } else {
+                    state = .idle
+                }
+            }
+        }
+    }
+
+    /// Speak a line, then resume the conversation listen loop.
+    private func speakAndRelisten(_ text: String) async throws {
+        guard let el = try? ElevenLabs(),
+              let mp3 = try? await el.synthesize(text: text, voiceId: persona.voiceId) else {
+            idleOrRelisten(); return
+        }
+        state = .speaking
+        player.play(mp3) { [weak self] in
+            Task { @MainActor in
+                guard let self, case .speaking = self.state else { return }
+                self.state = .idle
+                if self.conversationActive { self.listenCycle() }
             }
         }
     }
