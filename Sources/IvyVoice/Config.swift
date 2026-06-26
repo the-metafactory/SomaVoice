@@ -73,4 +73,19 @@ enum Config {
     /// Working directory for the brain — `~/.claude` so the full PAI config
     /// (CLAUDE.md → Ivy identity, all skills) loads for every turn.
     static var brainWorkingDir: String { "\(NSHomeDirectory())/.claude" }
+
+    /// Environment for spawned brains. A GUI .app launched via `open` inherits a
+    /// bare environment — no PATH to homebrew, and none of the provider keys that
+    /// live in ~/.zshenv. Without this, `pi` fails with "No API key found". We
+    /// merge a good PATH plus the keys we parsed from the env files.
+    static func childEnvironment() -> [String: String] {
+        var e = ProcessInfo.processInfo.environment
+        let path = "/opt/homebrew/bin:\(NSHomeDirectory())/.local/bin:/usr/local/bin"
+        e["PATH"] = path + ":" + (e["PATH"] ?? "/usr/bin:/bin")
+        for key in ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY",
+                    "OPENAI_API_KEY", "GEMINI_API_KEY"] {
+            if let v = value(key), !v.isEmpty { e[key] = v }
+        }
+        return e
+    }
 }

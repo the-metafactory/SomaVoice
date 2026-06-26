@@ -35,10 +35,7 @@ final class BrainSession {
             "--append-system-prompt", persona.preamble,
         ]
         p.currentDirectoryURL = URL(fileURLWithPath: Config.brainWorkingDir)
-        var env = ProcessInfo.processInfo.environment
-        let extra = "\(NSHomeDirectory())/.local/bin:/opt/homebrew/bin:/usr/local/bin"
-        env["PATH"] = extra + ":" + (env["PATH"] ?? "/usr/bin:/bin")
-        p.environment = env
+        p.environment = Config.childEnvironment()
 
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
         p.standardInput = inPipe

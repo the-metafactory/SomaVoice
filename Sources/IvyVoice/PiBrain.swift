@@ -73,30 +73,45 @@ final class PiBrain: Brain {
         return trimmed.isEmpty ? "(no reply)" : trimmed
     }
 
-    private func run(args: [String]) async throws -> String {
+    private func run(args: [String], timeout: TimeInterval = 60) async throws -> String {
         try await withCheckedThrowingContinuation { cont in
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: Config.piPath)
             proc.arguments = args
-            var env = ProcessInfo.processInfo.environment
-            let extra = "/opt/homebrew/bin:\(NSHomeDirectory())/.local/bin:/usr/local/bin"
-            env["PATH"] = extra + ":" + (env["PATH"] ?? "/usr/bin:/bin")
-            proc.environment = env
+            proc.environment = Config.childEnvironment()
 
             let outPipe = Pipe(), errPipe = Pipe()
             proc.standardOutput = outPipe
             proc.standardError = errPipe
+
+            // Resume exactly once — whichever fires first (exit or timeout).
+            let lock = NSLock(); var done = false
+            func finish(_ r: Result<String, Error>) {
+                lock.lock(); let first = !done; done = true; lock.unlock()
+                if first { cont.resume(with: r) }
+            }
+
+            // Watchdog: never let the UI spin on "thinking" forever.
+            let killer = DispatchWorkItem {
+                proc.terminate()
+                finish(.failure(NSError(domain: "PiBrain", code: -1, userInfo:
+                    [NSLocalizedDescriptionKey: "pi timed out after \(Int(timeout))s"])))
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
+
             proc.terminationHandler = { p in
+                killer.cancel()
                 let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                if out.isEmpty && p.terminationStatus != 0 {
-                    let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "exit \(p.terminationStatus)"
-                    cont.resume(throwing: NSError(domain: "PiBrain", code: Int(p.terminationStatus),
-                        userInfo: [NSLocalizedDescriptionKey: err]))
+                let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                // Surface auth/config failures instead of returning an empty turn.
+                if p.terminationStatus != 0, !err.isEmpty {
+                    finish(.failure(NSError(domain: "PiBrain", code: Int(p.terminationStatus),
+                        userInfo: [NSLocalizedDescriptionKey: String(err.prefix(200))])))
                 } else {
-                    cont.resume(returning: out)
+                    finish(.success(out))
                 }
             }
-            do { try proc.run() } catch { cont.resume(throwing: error) }
+            do { try proc.run() } catch { finish(.failure(error)) }
         }
     }
 }
