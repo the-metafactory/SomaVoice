@@ -85,16 +85,12 @@ final class PiBrain: Brain {
             proc.standardError = errPipe
 
             // Resume exactly once — whichever fires first (exit or timeout).
-            let lock = NSLock(); var done = false
-            func finish(_ r: Result<String, Error>) {
-                lock.lock(); let first = !done; done = true; lock.unlock()
-                if first { cont.resume(with: r) }
-            }
+            let once = ResumeOnce(cont)
 
             // Watchdog: never let the UI spin on "thinking" forever.
             let killer = DispatchWorkItem {
                 proc.terminate()
-                finish(.failure(NSError(domain: "PiBrain", code: -1, userInfo:
+                once.resume(.failure(NSError(domain: "PiBrain", code: -1, userInfo:
                     [NSLocalizedDescriptionKey: "pi timed out after \(Int(timeout))s"])))
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
@@ -105,13 +101,26 @@ final class PiBrain: Brain {
                 let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
                 // Surface auth/config failures instead of returning an empty turn.
                 if p.terminationStatus != 0, !err.isEmpty {
-                    finish(.failure(NSError(domain: "PiBrain", code: Int(p.terminationStatus),
+                    once.resume(.failure(NSError(domain: "PiBrain", code: Int(p.terminationStatus),
                         userInfo: [NSLocalizedDescriptionKey: String(err.prefix(200))])))
                 } else {
-                    finish(.success(out))
+                    once.resume(.success(out))
                 }
             }
-            do { try proc.run() } catch { finish(.failure(error)) }
+            do { try proc.run() } catch { once.resume(.failure(error)) }
         }
+    }
+}
+
+/// Resumes a continuation exactly once, from whichever concurrent callback fires
+/// first (process exit or watchdog timeout). Lock-guarded → safe to share.
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    private let cont: CheckedContinuation<String, Error>
+    init(_ cont: CheckedContinuation<String, Error>) { self.cont = cont }
+    func resume(_ r: Result<String, Error>) {
+        lock.lock(); let first = !done; done = true; lock.unlock()
+        if first { cont.resume(with: r) }
     }
 }
