@@ -50,7 +50,7 @@ final class Conversation: ObservableObject {
     private let openRouterBrain = OpenRouterBrain()
     private let skilledBrain = WarmBrain()
     private let stt = SpeechTranscriber()
-    private var hotKey: GlobalHotKey?
+    private var hotKey: ModifierHotKey?
 
     private var brain: Brain {
         switch brainKind {
@@ -83,10 +83,26 @@ final class Conversation: ObservableObject {
         }
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
 
-        // System-wide push-to-talk: Control-Option-Space from any app.
+        // System-wide hold-to-talk: hold Control+Option from any app.
         if hotKey == nil {
-            hotKey = GlobalHotKey.controlOptionSpace { [weak self] in self?.toggleTalk() }
+            ModifierHotKey.requestAccessibility() // needed for the global monitor
+            hotKey = ModifierHotKey(
+                onStart: { [weak self] in self?.holdStart() },
+                onStop: { [weak self] in self?.holdEnd() })
         }
+    }
+
+    /// Chord pressed — begin listening (barge-in over any current speech).
+    func holdStart() {
+        switch state {
+        case .listening, .thinking: return
+        default: startListening()
+        }
+    }
+
+    /// Chord released — send what was captured.
+    func holdEnd() {
+        if state == .listening { stopAndProcess() }
     }
 
     func setBrainKind(_ kind: BrainKind) {
