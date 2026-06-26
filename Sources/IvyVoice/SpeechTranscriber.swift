@@ -26,12 +26,14 @@ struct SpeechTranscriber {
         }
     }
 
-    /// Transcribe a recorded audio file, preferring on-device recognition.
-    func transcribe(fileURL: URL) async throws -> String {
+    /// Transcribe a recorded audio file in `localeID` (e.g. "en-US", "de-CH").
+    /// Uses on-device recognition when an asset exists for that locale; otherwise
+    /// falls back to server recognition (audio leaves the machine for that one).
+    func transcribe(fileURL: URL, localeID: String) async throws -> String {
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
             throw SpeechError.notAuthorized
         }
-        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeID)),
               recognizer.isAvailable else {
             throw SpeechError.unavailable
         }

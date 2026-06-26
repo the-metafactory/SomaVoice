@@ -56,6 +56,9 @@ Other choices:
 - **STT = Apple Speech, on-device.** Audio never leaves the machine (privacy),
   no cloud API scope. Requires macOS Dictation enabled (an MDM policy can
   disable it; a local whisper.cpp fallback is the alternative — not yet wired).
+  **Language is per-locale (no auto-detect)** — a picker selects it: EN (en-US)
+  and DE-CH (de-CH) run on-device; DE (de-DE) needs a downloaded asset or falls
+  back to server recognition (audio leaves the machine for that locale only).
 - **TTS = ElevenLabs** (`eleven_turbo_v2_5`) in the persona's voice — Ivy uses
   the voice id from `~/.env`.
 - **Pull, not push.** It only ever speaks in reply to you. Push-to-talk; talk

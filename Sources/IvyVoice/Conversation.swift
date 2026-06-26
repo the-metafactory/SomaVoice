@@ -40,6 +40,21 @@ final class Conversation: ObservableObject {
         }
     }
 
+    /// Speech-recognition language (per-locale; Apple Speech has no auto-detect).
+    enum SttLanguage: String, CaseIterable, Identifiable {
+        case enUS = "en-US"     // on-device
+        case deCH = "de-CH"     // Swiss German, on-device
+        case deDE = "de-DE"     // High German, server unless asset downloaded
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .enUS: return "EN"
+            case .deCH: return "DE-CH"
+            case .deDE: return "DE"
+            }
+        }
+    }
+
     /// Deep-thinking substrate the Router escalates to.
     enum DeepSubstrate: String, CaseIterable, Identifiable {
         case piDev, codex, claudeCode
@@ -60,6 +75,10 @@ final class Conversation: ObservableObject {
     @Published var deepSubstrate: DeepSubstrate =
         DeepSubstrate(rawValue: UserDefaults.standard.string(forKey: "deepSubstrate") ?? "") ?? .piDev {
         didSet { UserDefaults.standard.set(deepSubstrate.rawValue, forKey: "deepSubstrate") }
+    }
+    @Published var sttLanguage: SttLanguage =
+        SttLanguage(rawValue: UserDefaults.standard.string(forKey: "sttLanguage") ?? "") ?? .enUS {
+        didSet { UserDefaults.standard.set(sttLanguage.rawValue, forKey: "sttLanguage") }
     }
     /// Hands-free back-and-forth: listen → respond → auto-listen, until toggled off.
     @Published var conversationActive = false
@@ -282,7 +301,7 @@ final class Conversation: ObservableObject {
         Task {
             do {
                 let el = try ElevenLabs()
-                let heard = try await stt.transcribe(fileURL: fileURL)
+                let heard = try await stt.transcribe(fileURL: fileURL, localeID: sttLanguage.rawValue)
                 try? FileManager.default.removeItem(at: fileURL)
                 guard !heard.isEmpty else { idleOrRelisten(); return }
                 transcript.append(Turn(speaker: "You", text: heard))
