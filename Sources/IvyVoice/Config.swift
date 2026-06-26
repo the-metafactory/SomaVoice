@@ -3,22 +3,28 @@ import Foundation
 /// Loads configuration from `~/.env` (KEY=VALUE lines), the same file the PAI
 /// voice server reads. We never hardcode the ElevenLabs key.
 enum Config {
+    // Read both ~/.env and ~/.zshenv. A GUI .app launched via `open` does NOT
+    // inherit the shell environment, so keys living in ~/.zshenv (e.g.
+    // OPENROUTER_API_KEY) would otherwise be invisible. ~/.env wins on conflict.
     private static let env: [String: String] = {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".env")
-        guard let text = try? String(contentsOf: path, encoding: .utf8) else { return [:] }
+        let home = FileManager.default.homeDirectoryForCurrentUser
         var out: [String: String] = [:]
-        for raw in text.split(separator: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            guard let eq = line.firstIndex(of: "=") else { continue }
-            let key = String(line[..<eq]).trimmingCharacters(in: .whitespaces)
-            var val = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
-            if val.count >= 2, (val.hasPrefix("\"") && val.hasSuffix("\"")) ||
-                (val.hasPrefix("'") && val.hasSuffix("'")) {
-                val = String(val.dropFirst().dropLast())
+        for name in [".zshenv", ".env"] {   // .env last → wins on overlap
+            guard let text = try? String(contentsOf: home.appendingPathComponent(name), encoding: .utf8)
+            else { continue }
+            for raw in text.split(separator: "\n") {
+                var line = raw.trimmingCharacters(in: .whitespaces)
+                if line.isEmpty || line.hasPrefix("#") { continue }
+                if line.hasPrefix("export ") { line = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+                guard let eq = line.firstIndex(of: "=") else { continue }
+                let key = String(line[..<eq]).trimmingCharacters(in: .whitespaces)
+                var val = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+                if val.count >= 2, (val.hasPrefix("\"") && val.hasSuffix("\"")) ||
+                    (val.hasPrefix("'") && val.hasSuffix("'")) {
+                    val = String(val.dropFirst().dropLast())
+                }
+                out[key] = val
             }
-            out[key] = val
         }
         return out
     }()
