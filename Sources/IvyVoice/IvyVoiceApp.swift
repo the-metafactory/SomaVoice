@@ -31,6 +31,7 @@ struct ContentView: View {
             Text("Tap ⌃⌥ (Control+Option) anywhere to start/stop a conversation. Or Talk / Space for one turn.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            tuning
             footer
         }
         .padding(12)
@@ -104,6 +105,44 @@ struct ContentView: View {
         .tint(convo.state == .listening ? .red : .accentColor)
     }
 
+    private var tuning: some View {
+        DisclosureGroup("VAD tuning") {
+            VStack(alignment: .leading, spacing: 8) {
+                // Live mic meter with the threshold marker — speak and watch it.
+                LevelMeter(level: convo.micLevel, threshold: convo.speechDB)
+                    .frame(height: 14)
+
+                slider("Mic threshold", value: Binding(
+                    get: { Double(convo.speechDB) }, set: { convo.speechDB = Float($0) }),
+                    range: -60...0, suffix: "\(Int(convo.speechDB)) dB",
+                    help: "Above this = speech. Set just over your room's noise floor.")
+
+                slider("End after pause", value: $convo.silenceHang,
+                    range: 0.3...3.0, suffix: String(format: "%.1f s", convo.silenceHang),
+                    help: "Silence that ends your turn. Raise if she cuts you off.")
+
+                slider("Max turn length", value: $convo.maxListen,
+                    range: 5...30, suffix: "\(Int(convo.maxListen)) s",
+                    help: "Hard cap per utterance.")
+            }
+            .padding(.top, 4)
+        }
+        .font(.caption)
+    }
+
+    private func slider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>,
+                        suffix: String, help: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack {
+                Text(label).font(.caption2)
+                Spacer()
+                Text(suffix).font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
+            Text(help).font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
     private var footer: some View {
         HStack {
             Spacer()
@@ -127,6 +166,29 @@ struct ContentView: View {
         case .error, .listening: return .red
         case .idle: return .secondary
         default: return .blue
+        }
+    }
+}
+
+/// Live mic level with the speech threshold marked. Bar turns green when the
+/// level is above threshold (i.e. counts as speech) — speak and watch it.
+struct LevelMeter: View {
+    let level: Float       // dBFS, -160..0
+    let threshold: Float   // dBFS
+    private let floor: Float = -60
+    private func norm(_ db: Float) -> CGFloat {
+        CGFloat(max(0, min(1, (db - floor) / (0 - floor))))
+    }
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.2))
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(level > threshold ? Color.green : Color.gray.opacity(0.6))
+                    .frame(width: w * norm(level))
+                Rectangle().fill(Color.red).frame(width: 2).offset(x: w * norm(threshold))
+            }
         }
     }
 }

@@ -47,6 +47,19 @@ final class Conversation: ObservableObject {
     /// Hands-free back-and-forth: listen → respond → auto-listen, until toggled off.
     @Published var conversationActive = false
 
+    // VAD tuning — live-adjustable via sliders, persisted across launches.
+    @Published var speechDB: Float = Float(UserDefaults.standard.object(forKey: "vad.speechDB") as? Double ?? -30) {
+        didSet { UserDefaults.standard.set(Double(speechDB), forKey: "vad.speechDB") }
+    }
+    @Published var silenceHang: Double = UserDefaults.standard.object(forKey: "vad.silenceHang") as? Double ?? 1.2 {
+        didSet { UserDefaults.standard.set(silenceHang, forKey: "vad.silenceHang") }
+    }
+    @Published var maxListen: Double = UserDefaults.standard.object(forKey: "vad.maxListen") as? Double ?? 15 {
+        didSet { UserDefaults.standard.set(maxListen, forKey: "vad.maxListen") }
+    }
+    /// Live mic level (dBFS) for the tuning meter; -160 when not listening.
+    @Published var micLevel: Float = -160
+
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
     private let routerBrain = RouterBrain()
@@ -138,9 +151,6 @@ final class Conversation: ObservableObject {
         vadTask?.cancel()
         vadTask = Task { @MainActor in
             let dt = 0.1
-            let speechDB: Float = -30      // above this = speech
-            let silenceHang = 1.2          // pause that ends an utterance
-            let maxListen = 15.0
             let noSpeechReset = 8.0        // re-listen if nothing said
             var spoke = false, silence = 0.0, elapsed = 0.0
 
@@ -149,6 +159,7 @@ final class Conversation: ObservableObject {
                 guard case .listening = state else { return }
                 elapsed += dt
                 let lvl = recorder.currentLevel()
+                micLevel = lvl
                 if lvl > speechDB { spoke = true; silence = 0 } else if spoke { silence += dt }
 
                 if spoke, silence >= silenceHang { stopAndProcess(); return }
@@ -159,6 +170,7 @@ final class Conversation: ObservableObject {
                     return
                 }
             }
+            micLevel = -160
         }
     }
 
