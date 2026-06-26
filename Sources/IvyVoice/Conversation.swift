@@ -306,6 +306,14 @@ final class Conversation: ObservableObject {
                 guard !heard.isEmpty else { idleOrRelisten(); return }
                 transcript.append(Turn(speaker: "You", text: heard))
 
+                // Voice "stop" — end the conversation with a short spoken confirm.
+                if conversationActive, isStopCommand(heard) {
+                    conversationActive = false
+                    deepReassure?.cancel()
+                    try await speakAndIdle("Okay, stopping. Tap to start again.", el)
+                    return
+                }
+
                 let text = try await brain.ask(heard, persona: persona)
                 deepReassure?.cancel() // answer's here — stop reassuring
                 transcript.append(Turn(speaker: persona.name, text: text))
@@ -323,6 +331,28 @@ final class Conversation: ObservableObject {
                 deepReassure?.cancel()
                 state = .error(error.localizedDescription)
             }
+        }
+    }
+
+    /// Recognize a spoken "stop the conversation" command (EN + DE).
+    private func isStopCommand(_ s: String) -> Bool {
+        let t = s.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " .,!?\n"))
+        if ["stop", "stopp", "halt", "schluss"].contains(t) { return true }
+        let phrases = [
+            "stop listening", "stop the conversation", "stop conversation", "stop ivy",
+            "that's all", "thats all", "goodbye ivy", "we're done", "were done", "that's enough",
+            "hör auf", "hoer auf", "beende", "das war's", "das wars", "danke das war",
+        ]
+        return phrases.contains { t.contains($0) }
+    }
+
+    /// Speak a one-off line then go idle (used for the stop confirmation).
+    private func speakAndIdle(_ text: String, _ el: ElevenLabs) async throws {
+        transcript.append(Turn(speaker: persona.name, text: text))
+        let mp3 = try await el.synthesize(text: text, voiceId: persona.voiceId)
+        state = .speaking
+        player.play(mp3) { [weak self] in
+            Task { @MainActor in if case .speaking = self?.state { self?.state = .idle } }
         }
     }
 
