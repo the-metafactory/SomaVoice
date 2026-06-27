@@ -24,6 +24,7 @@ final class ContinuousListener {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var running = false
+    private var configObserver: NSObjectProtocol?
 
     // VAD state (touched only from the serial tap callback).
     private var speaking = false
@@ -39,23 +40,35 @@ final class ContinuousListener {
         guard !running, SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeID))
         guard recognizer?.isAvailable == true else { return }
+        running = true
+        // Rebuild on input/output device changes (e.g. plugging in headphones) —
+        // the engine stops and the tap format goes stale otherwise.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            self?.bringUp()
+        }
+        bringUp()
+    }
 
+    /// (Re)install the tap on the current input device and start the engine.
+    private func bringUp() {
+        guard running else { return }
         let node = engine.inputNode
         try? node.setVoiceProcessingEnabled(true)   // AEC — best effort
-
         node.removeTap(onBus: 0)
         node.installTap(onBus: 0, bufferSize: 1024, format: node.outputFormat(forBus: 0)) { [weak self] buf, _ in
             self?.handleBuffer(buf)
         }
+        speaking = false; silenceAccum = 0
         engine.prepare()
         do { try engine.start() } catch { return }
-
-        running = true
         newRecognition()
     }
 
     func stop() {
         running = false
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = nil
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
         engine.inputNode.removeTap(onBus: 0)

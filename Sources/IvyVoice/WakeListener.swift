@@ -16,6 +16,7 @@ final class WakeListener {
     private var task: SFSpeechRecognitionTask?
     private var restart: Task<Void, Never>?
     private var running = false
+    private var configObserver: NSObjectProtocol?
 
     init(onWake: @escaping () -> Void) { self.onWake = onWake }
 
@@ -26,11 +27,18 @@ final class WakeListener {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeID))
         guard recognizer?.isAvailable == true else { return }
         running = true
+        // Rebuild on device changes (headphones in/out) — the engine stops otherwise.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            self?.cycle()
+        }
         beginTask()
     }
 
     func stop() {
         running = false
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = nil
         restart?.cancel(); restart = nil
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
