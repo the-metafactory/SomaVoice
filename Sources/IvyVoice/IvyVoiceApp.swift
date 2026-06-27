@@ -139,6 +139,11 @@ struct ContentView: View {
             }
             Text("Say “\(convo.wakePhrase)” to wake. Learn = say your phrase once (2.5s).")
                 .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Always-on (barge-in)", isOn: Binding(
+                get: { convo.bargeIn }, set: { convo.bargeIn = $0 }))
+                .font(.caption).toggleStyle(.switch).controlSize(.mini)
+            Text("Interrupt Ivy by talking (echo-cancelled). Off = push-style turns.")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 

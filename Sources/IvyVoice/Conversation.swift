@@ -96,6 +96,10 @@ final class Conversation: ObservableObject {
     @Published var wakePhrase = UserDefaults.standard.string(forKey: "wakePhrase") ?? "hey ivy" {
         didSet { UserDefaults.standard.set(wakePhrase, forKey: "wakePhrase") }
     }
+    /// Always-on listening with echo-cancelled barge-in (interrupt Ivy by voice).
+    @Published var bargeIn = UserDefaults.standard.object(forKey: "bargeIn") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(bargeIn, forKey: "bargeIn") }
+    }
     /// Hands-free back-and-forth: listen → respond → auto-listen, until toggled off.
     @Published var conversationActive = false
 
@@ -128,6 +132,7 @@ final class Conversation: ObservableObject {
     private var vadTask: Task<Void, Never>?
     private var turnSeq = 0   // bumped per listen and on stop/barge-in; gates stale deep answers
     private lazy var wakeListener = WakeListener { [weak self] in self?.onWakeDetected() }
+    private lazy var continuous = ContinuousListener()
 
     private var brain: Brain {
         switch brainKind {
@@ -186,7 +191,32 @@ final class Conversation: ObservableObject {
     private func startConversation() {
         wakeListener.stop()        // conversation owns the mic now
         conversationActive = true
-        listenCycle()
+        if bargeIn { startContinuous() } else { listenCycle() }
+    }
+
+    /// Always-on mode: one echo-cancelled stream, utterances + instant barge-in.
+    private func startContinuous() {
+        continuous.localeID = sttLanguage.rawValue
+        continuous.speechDB = speechDB
+        continuous.onLevel = { [weak self] l in self?.micLevel = l }
+        continuous.onSpeechStart = { [weak self] in self?.handleSpeechStart() }
+        continuous.onUtterance = { [weak self] t in self?.processUtterance(t) }
+        continuous.start()
+        state = .listening
+    }
+
+    /// User started talking — if Ivy is speaking or thinking, cut her off (barge-in)
+    /// and invalidate the in-flight turn.
+    private func handleSpeechStart() {
+        switch state {
+        case .speaking, .thinking:
+            turnSeq += 1
+            deepReassure?.cancel()
+            player.stop()
+            state = .listening
+        default:
+            if case .listening = state {} else { state = .listening }
+        }
     }
 
     // MARK: - Wake word
@@ -234,6 +264,7 @@ final class Conversation: ObservableObject {
         turnSeq += 1   // invalidate any in-flight deep turn
         vadTask?.cancel()
         deepReassure?.cancel()
+        continuous.stop()
         recorder.stop()
         player.stop()
         state = .idle
@@ -354,74 +385,69 @@ final class Conversation: ObservableObject {
         }
     }
 
+    /// One-shot (push-style) capture: record → transcribe → process.
     private func stopAndProcess() {
-        guard let fileURL = recorder.stop() else {
-            idleOrRelisten()
+        guard let fileURL = recorder.stop() else { idleOrRelisten(); return }
+        state = .thinking
+        let token = turnSeq
+        Task {
+            let heard = (try? await stt.transcribe(fileURL: fileURL, localeID: sttLanguage.rawValue)) ?? ""
+            try? FileManager.default.removeItem(at: fileURL)
+            guard token == turnSeq else { return }
+            if heard.isEmpty { idleOrRelisten(); return }
+            processUtterance(heard)
+        }
+    }
+
+    /// Unified turn: used by one-shot capture AND the continuous listener. Handles
+    /// stop-commands, runs the brain, speaks, and returns to listening. A per-turn
+    /// token lets a barge-in / stop discard a stale (e.g. deep) answer.
+    private func processUtterance(_ heard: String) {
+        let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !h.isEmpty else { afterSpeak(); return }
+        transcript.append(Turn(speaker: "You", text: h))
+
+        if conversationActive, isStopCommand(h) {
+            stopConversation()
+            Task { if let el = try? ElevenLabs() { try? await speakAndIdle("Okay, stopping.", el) } }
             return
         }
+
         state = .thinking
+        let token = turnSeq
         let persona = self.persona
-        let token = turnSeq   // this turn; stop/barge-in bumps turnSeq to invalidate
         Task {
             do {
                 let el = try ElevenLabs()
-                let heard = try await stt.transcribe(fileURL: fileURL, localeID: sttLanguage.rawValue)
-                guard token == turnSeq else { return }  // superseded (stopped / new turn)
-                try? FileManager.default.removeItem(at: fileURL)
-                guard !heard.isEmpty else { idleOrRelisten(); return }
-                transcript.append(Turn(speaker: "You", text: heard))
-
-                // Voice "stop" — end the conversation with a short spoken confirm.
-                if conversationActive, isStopCommand(heard) {
-                    conversationActive = false
-                    deepReassure?.cancel()
-                    try await speakAndIdle("Okay, stopping. Tap to start again.", el)
-                    return
-                }
-
-                let text = try await brain.ask(heard, persona: persona)
-                deepReassure?.cancel() // answer's here — stop reassuring
-                guard token == turnSeq else { return }  // stopped/barged while deep ran
+                let text = try await brain.ask(h, persona: persona)
+                deepReassure?.cancel()
+                guard token == turnSeq else { return }   // barged / stopped while running
                 transcript.append(Turn(speaker: persona.name, text: text))
-
                 let mp3 = try await el.synthesize(text: text, voiceId: persona.voiceId)
+                guard token == turnSeq else { return }
                 state = .speaking
                 player.play(mp3) { [weak self] in
                     Task { @MainActor in
                         guard let self, case .speaking = self.state else { return }
-                        self.state = .idle
-                        if self.conversationActive { self.listenCycle() } // next turn
+                        self.afterSpeak()
                     }
                 }
             } catch {
                 deepReassure?.cancel()
-                guard token == turnSeq else { return }  // stopped/barged — stay stopped
+                guard token == turnSeq else { return }
                 transcript.append(Turn(speaker: persona.name, text: "Sorry — that didn't go through."))
-                // Never strand the loop: in a conversation keep listening; otherwise
-                // go idle (which restarts the wake listener if enabled). A sticky
-                // .error here was killing voice after a flaky deep turn.
-                if conversationActive {
-                    try? await speakAndRelisten("Sorry, that didn't go through.")
-                } else {
-                    state = .idle
-                }
+                afterSpeak()
             }
         }
     }
 
-    /// Speak a line, then resume the conversation listen loop.
-    private func speakAndRelisten(_ text: String) async throws {
-        guard let el = try? ElevenLabs(),
-              let mp3 = try? await el.synthesize(text: text, voiceId: persona.voiceId) else {
-            idleOrRelisten(); return
-        }
-        state = .speaking
-        player.play(mp3) { [weak self] in
-            Task { @MainActor in
-                guard let self, case .speaking = self.state else { return }
-                self.state = .idle
-                if self.conversationActive { self.listenCycle() }
-            }
+    /// After speaking (or a recoverable error): keep the right listening mode alive.
+    private func afterSpeak() {
+        if conversationActive {
+            if bargeIn { state = .listening }   // continuous listener is already running
+            else { listenCycle() }
+        } else {
+            state = .idle                       // didSet restarts the wake listener
         }
     }
 

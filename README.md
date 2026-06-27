@@ -118,6 +118,12 @@ skills and can tolerate the wait — or dispatch that work async to Cortex.
   subscription the CLI uses). Until added, use the Skilled toggle.
 - Fast brain has no Claude Code skills — personality only. Skill work belongs on
   the Skilled brain or an async Cortex dispatch.
+- **Always-on / barge-in (default on)** — a continuous echo-cancelled
+  (`setVoiceProcessingEnabled`) `AVAudioEngine` keeps listening through Ivy's own
+  speech, so you can **interrupt her by talking** (or cut off a deep turn) and she
+  picks up your new utterance. Utterances are segmented by SFSpeech endpointing.
+  Toggle off to fall back to push-style VAD turns. Echo cancellation quality is
+  the make-or-break — works best built-in; headphones make it trivial.
 - **Wake word (optional, always-on)** — toggle it on and say your phrase (default
   "hey ivy") to start a conversation hands-free. "Learn phrase" records you saying
   it once and stores the transcript as the phrase. Uses continuous on-device
