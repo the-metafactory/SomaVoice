@@ -118,6 +118,7 @@ final class Conversation: ObservableObject {
     @Published var micLevel: Float = -160
     @Published var micThreshold: Float = -42
     @Published var micFloor: Float = -50
+    @Published var partialText = ""   // live continuous transcript / recognition error (debug)
     /// Echo cancellation (voice-processing) for barge-in. Toggle to diagnose AGC issues.
     @Published var aecEnabled = UserDefaults.standard.object(forKey: "aecEnabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(aecEnabled, forKey: "aecEnabled") }
@@ -212,6 +213,7 @@ final class Conversation: ObservableObject {
         }
         continuous.onSpeechStart = { [weak self] in self?.handleSpeechStart() }
         continuous.onUtterance = { [weak self] t in self?.processUtterance(t) }
+        continuous.onPartial = { [weak self] t in self?.partialText = t }
         continuous.start()
         state = .listening
     }

@@ -18,6 +18,7 @@ final class ContinuousListener {
     var onSpeechStart: () -> Void = {}
     var onUtterance: (String) -> Void = { _ in }
     var onLevel: (Float, Float, Float) -> Void = { _, _, _ in }   // (level, threshold, floor)
+    var onPartial: (String) -> Void = { _ in }   // live transcript / recognition errors (debug)
 
     private let engine = AVAudioEngine()
     private var recognizer: SFSpeechRecognizer?
@@ -109,9 +110,15 @@ final class ContinuousListener {
         req.shouldReportPartialResults = true
         if recognizer?.supportsOnDeviceRecognition == true { req.requiresOnDeviceRecognition = true }
         request = req
-        task = recognizer?.recognitionTask(with: req) { [weak self] result, _ in
-            guard let self, let result else { return }
-            self.setText(result.bestTranscription.formattedString)
+        task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
+            guard let self else { return }
+            if let result {
+                let t = result.bestTranscription.formattedString
+                self.setText(t)
+                DispatchQueue.main.async { self.onPartial(t) }
+            } else if let error {
+                DispatchQueue.main.async { self.onPartial("⚠︎ \(error.localizedDescription)") }
+            }
         }
     }
 

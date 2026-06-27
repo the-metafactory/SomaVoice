@@ -166,6 +166,11 @@ struct ContentView: View {
                     get: { convo.aecEnabled }, set: { convo.setAec($0) }))
                     .font(.caption2).toggleStyle(.switch).controlSize(.mini)
 
+                Text("stt: \(convo.partialText.isEmpty ? "—" : convo.partialText)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(convo.partialText.hasPrefix("⚠︎") ? .red : .secondary)
+                    .lineLimit(2)
+
                 slider("Voice sensitivity", value: Binding(
                     get: { Double(convo.vadMargin) }, set: { convo.vadMargin = Float($0) }),
                     range: 3...20, suffix: "\(Int(convo.vadMargin)) dB",
