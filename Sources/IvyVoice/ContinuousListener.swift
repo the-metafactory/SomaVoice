@@ -3,18 +3,18 @@ import Speech
 
 /// Always-on listening with barge-in. One continuous AVAudioEngine with
 /// voice-processing (acoustic echo cancellation) so the mic doesn't hear Ivy's
-/// own TTS — that's what makes interrupting her possible without a feedback loop.
+/// own TTS — that's what makes interrupting her possible without feedback.
 ///
-/// Two signals out:
-///  • onSpeechStart — fired the instant the user's level crosses threshold
-///    (immediate, for barge-in: stop playback / cancel a deep turn).
-///  • onUtterance — the finalized transcript when SFSpeech endpoints a pause.
-///
-/// onLevel drives the tuning meter. Segments by restarting the recognition task
-/// at each final result (also dodges Apple's ~1-min task limit).
+/// Segmentation is VAD-driven, NOT SFSpeech `isFinal`: with a continuous stream
+/// `isFinal` only fires on endAudio(), so we watch the mic level ourselves —
+/// speech onset fires `onSpeechStart` (instant, for barge-in); a silence gap
+/// after speech emits the latest partial transcript as `onUtterance` and swaps
+/// in a fresh recognizer for the next utterance. The engine/tap stay up the
+/// whole time (truly always listening); only the recognition request cycles.
 final class ContinuousListener {
     var localeID = "en-US"
     var speechDB: Float = -30
+    var silenceHang: Double = 1.2
     var onSpeechStart: () -> Void = {}
     var onUtterance: (String) -> Void = { _ in }
     var onLevel: (Float) -> Void = { _ in }
@@ -23,9 +23,15 @@ final class ContinuousListener {
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
-    private var cycleTimer: Task<Void, Never>?
     private var running = false
-    private var speaking = false   // user is mid-utterance (onSpeechStart already fired)
+
+    // VAD state (touched only from the serial tap callback).
+    private var speaking = false
+    private var silenceAccum = 0.0
+
+    // Latest partial transcript (written by the recognition handler).
+    private let textLock = NSLock()
+    private var latestText = ""
 
     var isRunning: Bool { running }
 
@@ -34,76 +40,84 @@ final class ContinuousListener {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeID))
         guard recognizer?.isAvailable == true else { return }
 
-        // Acoustic echo cancellation — the whole point. Best-effort.
-        try? engine.inputNode.setVoiceProcessingEnabled(true)
+        let node = engine.inputNode
+        try? node.setVoiceProcessingEnabled(true)   // AEC — best effort
+
+        node.removeTap(onBus: 0)
+        node.installTap(onBus: 0, bufferSize: 1024, format: node.outputFormat(forBus: 0)) { [weak self] buf, _ in
+            self?.handleBuffer(buf)
+        }
+        engine.prepare()
+        do { try engine.start() } catch { return }
+
         running = true
-        beginTask()
+        newRecognition()
     }
 
     func stop() {
         running = false
-        cycleTimer?.cancel(); cycleTimer = nil
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        speaking = false
+        speaking = false; silenceAccum = 0
+        setText("")
     }
 
-    private func beginTask() {
+    // MARK: - audio
+
+    private func handleBuffer(_ buf: AVAudioPCMBuffer) {
+        request?.append(buf)
+        let db = Self.levelDB(buf)
+        let dur = Double(buf.frameLength) / buf.format.sampleRate
+
+        DispatchQueue.main.async { self.onLevel(db) }
+
+        if db > speechDB {
+            silenceAccum = 0
+            if !speaking {
+                speaking = true
+                DispatchQueue.main.async { self.onSpeechStart() }
+            }
+        } else if speaking {
+            silenceAccum += dur
+            if silenceAccum >= silenceHang {
+                endUtterance()
+            }
+        }
+    }
+
+    /// Pause after speech → emit the latest transcript, reset, fresh recognizer.
+    private func endUtterance() {
+        speaking = false
+        silenceAccum = 0
+        let text = getText().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard running else { return }
+        // swap recognizer first so the next words start clean
+        newRecognition()
+        if !text.isEmpty { DispatchQueue.main.async { self.onUtterance(text) } }
+    }
+
+    // MARK: - recognition (cycled per utterance; engine keeps running)
+
+    private func newRecognition() {
+        task?.cancel(); task = nil
+        request?.endAudio()
+        setText("")
+
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
         if recognizer?.supportsOnDeviceRecognition == true { req.requiresOnDeviceRecognition = true }
         request = req
-        speaking = false
-
-        let node = engine.inputNode
-        node.removeTap(onBus: 0)
-        node.installTap(onBus: 0, bufferSize: 1024, format: node.outputFormat(forBus: 0)) { [weak self] buf, _ in
-            guard let self else { return }
-            self.request?.append(buf)
-            let db = Self.levelDB(buf)
-            DispatchQueue.main.async {
-                self.onLevel(db)
-                if db > self.speechDB, !self.speaking {
-                    self.speaking = true
-                    self.onSpeechStart()
-                }
-            }
-        }
-        engine.prepare()
-        do { try engine.start() } catch { running = false; return }
-
-        task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
-            guard let self else { return }
-            if let result, result.isFinal {
-                let text = result.bestTranscription.formattedString
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty { DispatchQueue.main.async { self.onUtterance(text) } }
-                if self.running { self.cycle() }
-            } else if error != nil {
-                if self.running { self.cycle() }
-            }
-        }
-
-        cycleTimer?.cancel()
-        cycleTimer = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 50_000_000_000)
-            self?.cycle()
+        task = recognizer?.recognitionTask(with: req) { [weak self] result, _ in
+            guard let self, let result else { return }
+            self.setText(result.bestTranscription.formattedString)
         }
     }
 
-    private func cycle() {
-        guard running else { return }
-        cycleTimer?.cancel(); cycleTimer = nil
-        task?.cancel(); task = nil
-        request?.endAudio(); request = nil
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        if running { beginTask() }
-    }
+    private func setText(_ s: String) { textLock.lock(); latestText = s; textLock.unlock() }
+    private func getText() -> String { textLock.lock(); defer { textLock.unlock() }; return latestText }
 
-    /// RMS level of a buffer in dBFS.
     private static func levelDB(_ buffer: AVAudioPCMBuffer) -> Float {
         guard let ch = buffer.floatChannelData else { return -160 }
         let n = Int(buffer.frameLength)

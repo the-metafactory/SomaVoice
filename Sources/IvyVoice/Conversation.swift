@@ -198,6 +198,7 @@ final class Conversation: ObservableObject {
     private func startContinuous() {
         continuous.localeID = sttLanguage.rawValue
         continuous.speechDB = speechDB
+        continuous.silenceHang = silenceHang
         continuous.onLevel = { [weak self] l in self?.micLevel = l }
         continuous.onSpeechStart = { [weak self] in self?.handleSpeechStart() }
         continuous.onUtterance = { [weak self] t in self?.processUtterance(t) }
