@@ -150,14 +150,15 @@ struct ContentView: View {
     private var tuning: some View {
         DisclosureGroup("VAD tuning") {
             VStack(alignment: .leading, spacing: 8) {
-                // Live mic meter with the threshold marker — speak and watch it.
-                LevelMeter(level: convo.micLevel, threshold: convo.speechDB)
+                // Live mic meter — red marker is the adaptive trigger (noise floor
+                // + sensitivity); bar goes green when you're above it.
+                LevelMeter(level: convo.micLevel, threshold: convo.micThreshold)
                     .frame(height: 14)
 
-                slider("Mic threshold", value: Binding(
-                    get: { Double(convo.speechDB) }, set: { convo.speechDB = Float($0) }),
-                    range: -60...0, suffix: "\(Int(convo.speechDB)) dB",
-                    help: "Above this = speech. Set just over your room's noise floor.")
+                slider("Voice sensitivity", value: Binding(
+                    get: { Double(convo.vadMargin) }, set: { convo.vadMargin = Float($0) }),
+                    range: 3...20, suffix: "\(Int(convo.vadMargin)) dB",
+                    help: "dB above the live noise floor that counts as speech. Lower = more sensitive. Auto-calibrates to your mic.")
 
                 slider("End after pause", value: $convo.silenceHang,
                     range: 0.3...3.0, suffix: String(format: "%.1f s", convo.silenceHang),

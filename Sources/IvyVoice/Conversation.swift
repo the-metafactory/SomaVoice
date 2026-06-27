@@ -104,8 +104,9 @@ final class Conversation: ObservableObject {
     @Published var conversationActive = false
 
     // VAD tuning — live-adjustable via sliders, persisted across launches.
-    @Published var speechDB: Float = Float(UserDefaults.standard.object(forKey: "vad.speechDB") as? Double ?? -30) {
-        didSet { UserDefaults.standard.set(Double(speechDB), forKey: "vad.speechDB") }
+    /// Adaptive trigger: speech = level this many dB above the live noise floor.
+    @Published var vadMargin: Float = Float(UserDefaults.standard.object(forKey: "vad.margin") as? Double ?? 8) {
+        didSet { UserDefaults.standard.set(Double(vadMargin), forKey: "vad.margin") }
     }
     @Published var silenceHang: Double = UserDefaults.standard.object(forKey: "vad.silenceHang") as? Double ?? 1.2 {
         didSet { UserDefaults.standard.set(silenceHang, forKey: "vad.silenceHang") }
@@ -113,8 +114,9 @@ final class Conversation: ObservableObject {
     @Published var maxListen: Double = UserDefaults.standard.object(forKey: "vad.maxListen") as? Double ?? 15 {
         didSet { UserDefaults.standard.set(maxListen, forKey: "vad.maxListen") }
     }
-    /// Live mic level (dBFS) for the tuning meter; -160 when not listening.
+    /// Live mic level + current trigger threshold (dBFS) for the tuning meter.
     @Published var micLevel: Float = -160
+    @Published var micThreshold: Float = -42
 
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
@@ -197,9 +199,9 @@ final class Conversation: ObservableObject {
     /// Always-on mode: one echo-cancelled stream, utterances + instant barge-in.
     private func startContinuous() {
         continuous.localeID = sttLanguage.rawValue
-        continuous.speechDB = speechDB
-        continuous.silenceHang = silenceHang
-        continuous.onLevel = { [weak self] l in self?.micLevel = l }
+        continuous.vad.margin = vadMargin
+        continuous.vad.hang = silenceHang
+        continuous.onLevel = { [weak self] l, t in self?.micLevel = l; self?.micThreshold = t }
         continuous.onSpeechStart = { [weak self] in self?.handleSpeechStart() }
         continuous.onUtterance = { [weak self] t in self?.processUtterance(t) }
         continuous.start()
@@ -286,17 +288,21 @@ final class Conversation: ObservableObject {
         vadTask = Task { @MainActor in
             let dt = 0.1
             let noSpeechReset = 8.0        // re-listen if nothing said
-            var spoke = false, silence = 0.0, elapsed = 0.0
+            let vad = VadDetector()
+            vad.margin = vadMargin; vad.hang = silenceHang
+            var spoke = false, elapsed = 0.0
 
             while !Task.isCancelled, case .listening = state {
                 try? await Task.sleep(nanoseconds: UInt64(dt * 1_000_000_000))
                 guard case .listening = state else { return }
                 elapsed += dt
                 let lvl = recorder.currentLevel()
-                micLevel = lvl
-                if lvl > speechDB { spoke = true; silence = 0 } else if spoke { silence += dt }
-
-                if spoke, silence >= silenceHang { stopAndProcess(); return }
+                micLevel = lvl; micThreshold = vad.threshold
+                switch vad.feed(lvl, dt: dt) {
+                case .onset:  spoke = true
+                case .offset: stopAndProcess(); return
+                case .none:   break
+                }
                 if spoke, elapsed >= maxListen { stopAndProcess(); return }
                 if !spoke, elapsed >= noSpeechReset {
                     recorder.stop()

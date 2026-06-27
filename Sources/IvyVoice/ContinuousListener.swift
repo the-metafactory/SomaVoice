@@ -13,11 +13,10 @@ import Speech
 /// whole time (truly always listening); only the recognition request cycles.
 final class ContinuousListener {
     var localeID = "en-US"
-    var speechDB: Float = -30
-    var silenceHang: Double = 1.2
+    let vad = VadDetector()   // set vad.margin / vad.hang from outside
     var onSpeechStart: () -> Void = {}
     var onUtterance: (String) -> Void = { _ in }
-    var onLevel: (Float) -> Void = { _ in }
+    var onLevel: (Float, Float) -> Void = { _, _ in }   // (level dBFS, threshold)
 
     private let engine = AVAudioEngine()
     private var recognizer: SFSpeechRecognizer?
@@ -25,10 +24,6 @@ final class ContinuousListener {
     private var task: SFSpeechRecognitionTask?
     private var running = false
     private var configObserver: NSObjectProtocol?
-
-    // VAD state (touched only from the serial tap callback).
-    private var speaking = false
-    private var silenceAccum = 0.0
 
     // Latest partial transcript (written by the recognition handler).
     private let textLock = NSLock()
@@ -59,7 +54,7 @@ final class ContinuousListener {
         node.installTap(onBus: 0, bufferSize: 1024, format: node.outputFormat(forBus: 0)) { [weak self] buf, _ in
             self?.handleBuffer(buf)
         }
-        speaking = false; silenceAccum = 0
+        vad.reset()
         engine.prepare()
         do { try engine.start() } catch { return }
         newRecognition()
@@ -73,7 +68,7 @@ final class ContinuousListener {
         request?.endAudio(); request = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        speaking = false; silenceAccum = 0
+        vad.reset()
         setText("")
     }
 
@@ -84,26 +79,17 @@ final class ContinuousListener {
         let db = Self.levelDB(buf)
         let dur = Double(buf.frameLength) / buf.format.sampleRate
 
-        DispatchQueue.main.async { self.onLevel(db) }
+        DispatchQueue.main.async { self.onLevel(db, self.vad.threshold) }
 
-        if db > speechDB {
-            silenceAccum = 0
-            if !speaking {
-                speaking = true
-                DispatchQueue.main.async { self.onSpeechStart() }
-            }
-        } else if speaking {
-            silenceAccum += dur
-            if silenceAccum >= silenceHang {
-                endUtterance()
-            }
+        switch vad.feed(db, dt: dur) {
+        case .onset:  DispatchQueue.main.async { self.onSpeechStart() }
+        case .offset: endUtterance()
+        case .none:   break
         }
     }
 
     /// Pause after speech → emit the latest transcript, reset, fresh recognizer.
     private func endUtterance() {
-        speaking = false
-        silenceAccum = 0
         let text = getText().trimmingCharacters(in: .whitespacesAndNewlines)
         guard running else { return }
         // swap recognizer first so the next words start clean
