@@ -26,6 +26,9 @@ final class ContinuousListener {
     private var task: SFSpeechRecognitionTask?
     private var running = false
     private var configObserver: NSObjectProtocol?
+    private var converter: AVAudioConverter?
+    private let sttFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                          sampleRate: 16000, channels: 1, interleaved: false)!
 
     // Latest partial transcript (written by the recognition handler).
     private let textLock = NSLock()
@@ -53,7 +56,9 @@ final class ContinuousListener {
         let node = engine.inputNode
         try? node.setVoiceProcessingEnabled(useAEC)   // AEC — toggleable for diagnosis
         node.removeTap(onBus: 0)
-        node.installTap(onBus: 0, bufferSize: 1024, format: node.outputFormat(forBus: 0)) { [weak self] buf, _ in
+        let inFormat = node.outputFormat(forBus: 0)
+        converter = AVAudioConverter(from: inFormat, to: sttFormat)
+        node.installTap(onBus: 0, bufferSize: 1024, format: inFormat) { [weak self] buf, _ in
             self?.handleBuffer(buf)
         }
         vad.reset()
@@ -77,7 +82,8 @@ final class ContinuousListener {
     // MARK: - audio
 
     private func handleBuffer(_ buf: AVAudioPCMBuffer) {
-        request?.append(buf)
+        // Feed SFSpeech 16k mono — raw 48k engine buffers don't reliably transcribe.
+        if let converted = convertTo16k(buf) { request?.append(converted) } else { request?.append(buf) }
         let db = Self.levelDB(buf)
         let dur = Double(buf.frameLength) / buf.format.sampleRate
 
@@ -120,6 +126,21 @@ final class ContinuousListener {
                 DispatchQueue.main.async { self.onPartial("⚠︎ \(error.localizedDescription)") }
             }
         }
+    }
+
+    /// Resample/downmix a tap buffer to 16k mono Float32 for SFSpeech.
+    private func convertTo16k(_ inBuf: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let converter else { return nil }
+        let ratio = sttFormat.sampleRate / inBuf.format.sampleRate
+        let cap = AVAudioFrameCount(Double(inBuf.frameLength) * ratio) + 16
+        guard let out = AVAudioPCMBuffer(pcmFormat: sttFormat, frameCapacity: cap) else { return nil }
+        var consumed = false
+        var err: NSError?
+        converter.convert(to: out, error: &err) { _, status in
+            if consumed { status.pointee = .noDataNow; return nil }
+            consumed = true; status.pointee = .haveData; return inBuf
+        }
+        return err == nil && out.frameLength > 0 ? out : nil
     }
 
     private func setText(_ s: String) { textLock.lock(); latestText = s; textLock.unlock() }
