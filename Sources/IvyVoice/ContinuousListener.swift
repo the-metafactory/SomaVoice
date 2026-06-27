@@ -13,10 +13,11 @@ import Speech
 /// whole time (truly always listening); only the recognition request cycles.
 final class ContinuousListener {
     var localeID = "en-US"
+    var useAEC = true         // voice-processing (echo cancellation) — toggle to diagnose
     let vad = VadDetector()   // set vad.margin / vad.hang from outside
     var onSpeechStart: () -> Void = {}
     var onUtterance: (String) -> Void = { _ in }
-    var onLevel: (Float, Float) -> Void = { _, _ in }   // (level dBFS, threshold)
+    var onLevel: (Float, Float, Float) -> Void = { _, _, _ in }   // (level, threshold, floor)
 
     private let engine = AVAudioEngine()
     private var recognizer: SFSpeechRecognizer?
@@ -49,7 +50,7 @@ final class ContinuousListener {
     private func bringUp() {
         guard running else { return }
         let node = engine.inputNode
-        try? node.setVoiceProcessingEnabled(true)   // AEC — best effort
+        try? node.setVoiceProcessingEnabled(useAEC)   // AEC — toggleable for diagnosis
         node.removeTap(onBus: 0)
         node.installTap(onBus: 0, bufferSize: 1024, format: node.outputFormat(forBus: 0)) { [weak self] buf, _ in
             self?.handleBuffer(buf)
@@ -79,7 +80,7 @@ final class ContinuousListener {
         let db = Self.levelDB(buf)
         let dur = Double(buf.frameLength) / buf.format.sampleRate
 
-        DispatchQueue.main.async { self.onLevel(db, self.vad.threshold) }
+        DispatchQueue.main.async { self.onLevel(db, self.vad.threshold, self.vad.floor) }
 
         switch vad.feed(db, dt: dur) {
         case .onset:  DispatchQueue.main.async { self.onSpeechStart() }

@@ -155,6 +155,17 @@ struct ContentView: View {
                 LevelMeter(level: convo.micLevel, threshold: convo.micThreshold)
                     .frame(height: 14)
 
+                // Diagnostic readout — report these numbers when tuning.
+                Text(String(format: "lvl %.0f · floor %.0f · trig %.0f dB · %@",
+                            convo.micLevel, convo.micFloor, convo.micThreshold,
+                            convo.micLevel > convo.micThreshold ? "SPEECH" : "—"))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(convo.micLevel > convo.micThreshold ? .green : .secondary)
+
+                Toggle("Echo cancellation (AEC)", isOn: Binding(
+                    get: { convo.aecEnabled }, set: { convo.setAec($0) }))
+                    .font(.caption2).toggleStyle(.switch).controlSize(.mini)
+
                 slider("Voice sensitivity", value: Binding(
                     get: { Double(convo.vadMargin) }, set: { convo.vadMargin = Float($0) }),
                     range: 3...20, suffix: "\(Int(convo.vadMargin)) dB",

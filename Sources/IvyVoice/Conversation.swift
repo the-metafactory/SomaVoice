@@ -114,9 +114,14 @@ final class Conversation: ObservableObject {
     @Published var maxListen: Double = UserDefaults.standard.object(forKey: "vad.maxListen") as? Double ?? 15 {
         didSet { UserDefaults.standard.set(maxListen, forKey: "vad.maxListen") }
     }
-    /// Live mic level + current trigger threshold (dBFS) for the tuning meter.
+    /// Live mic level + current trigger threshold + noise floor (dBFS) for the meter/readout.
     @Published var micLevel: Float = -160
     @Published var micThreshold: Float = -42
+    @Published var micFloor: Float = -50
+    /// Echo cancellation (voice-processing) for barge-in. Toggle to diagnose AGC issues.
+    @Published var aecEnabled = UserDefaults.standard.object(forKey: "aecEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(aecEnabled, forKey: "aecEnabled") }
+    }
 
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
@@ -199,13 +204,25 @@ final class Conversation: ObservableObject {
     /// Always-on mode: one echo-cancelled stream, utterances + instant barge-in.
     private func startContinuous() {
         continuous.localeID = sttLanguage.rawValue
+        continuous.useAEC = aecEnabled
         continuous.vad.margin = vadMargin
         continuous.vad.hang = silenceHang
-        continuous.onLevel = { [weak self] l, t in self?.micLevel = l; self?.micThreshold = t }
+        continuous.onLevel = { [weak self] l, t, f in
+            self?.micLevel = l; self?.micThreshold = t; self?.micFloor = f
+        }
         continuous.onSpeechStart = { [weak self] in self?.handleSpeechStart() }
         continuous.onUtterance = { [weak self] t in self?.processUtterance(t) }
         continuous.start()
         state = .listening
+    }
+
+    /// Toggle echo cancellation live (restarts the continuous listener to apply it).
+    func setAec(_ on: Bool) {
+        aecEnabled = on
+        if bargeIn, conversationActive {
+            continuous.stop()
+            startContinuous()
+        }
     }
 
     /// User started talking — if Ivy is speaking or thinking, cut her off (barge-in)
@@ -297,7 +314,7 @@ final class Conversation: ObservableObject {
                 guard case .listening = state else { return }
                 elapsed += dt
                 let lvl = recorder.currentLevel()
-                micLevel = lvl; micThreshold = vad.threshold
+                micLevel = lvl; micThreshold = vad.threshold; micFloor = vad.floor
                 switch vad.feed(lvl, dt: dt) {
                 case .onset:  spoke = true
                 case .offset: stopAndProcess(); return

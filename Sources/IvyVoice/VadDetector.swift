@@ -18,6 +18,7 @@ final class VadDetector {
 
     /// Live onset threshold, for the meter marker.
     var threshold: Float { noiseFloor + margin }
+    var floor: Float { noiseFloor }
 
     func reset() { speaking = false; silence = 0 }   // keep the learned floor
 
