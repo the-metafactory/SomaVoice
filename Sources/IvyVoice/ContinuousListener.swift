@@ -114,7 +114,9 @@ final class ContinuousListener {
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        if recognizer?.supportsOnDeviceRecognition == true { req.requiresOnDeviceRecognition = true }
+        // NOTE: do NOT force on-device for the streaming request — it gets canceled
+        // immediately on this setup. Let SFSpeech pick (server) so we get results.
+        req.requiresOnDeviceRecognition = false
         request = req
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             guard let self else { return }
