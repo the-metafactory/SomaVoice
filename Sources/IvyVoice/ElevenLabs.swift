@@ -25,29 +25,29 @@ struct ElevenLabs {
 
     /// Transcribe a recorded audio file → text. Uses the `scribe_v1` model.
     func transcribe(fileURL: URL) async throws -> String {
+        let data = try Data(contentsOf: fileURL)
+        return try await transcribe(audio: data, filename: fileURL.lastPathComponent, mime: "audio/m4a")
+    }
+
+    /// Transcribe raw audio bytes (e.g. a WAV captured from the mic stream).
+    func transcribe(audio: Data, filename: String = "utt.wav", mime: String = "audio/wav") async throws -> String {
         let url = URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
 
         let boundary = "Boundary-\(UUID().uuidString)"
-        req.setValue("multipart/form-data; boundary=\(boundary)",
-                     forHTTPHeaderField: "Content-Type")
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
-        func field(_ name: String, _ value: String) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(value)\r\n".data(using: .utf8)!)
-        }
-        field("model_id", "scribe_v1")
-        let fileData = try Data(contentsOf: fileURL)
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
-        body.append(fileData)
-        body.append("\r\n".data(using: .utf8)!)
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"model_id\"\r\n\r\n".data(using: .utf8)!)
+        body.append("scribe_v1\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
+        body.append(audio)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
 
         let (data, resp) = try await URLSession.shared.data(for: req)

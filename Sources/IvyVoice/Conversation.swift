@@ -55,6 +55,13 @@ final class Conversation: ObservableObject {
         }
     }
 
+    /// Speech-to-text engine.
+    enum SttBackend: String, CaseIterable, Identifiable {
+        case apple, elevenLabs
+        var id: String { rawValue }
+        var label: String { self == .apple ? "Apple" : "ElevenLabs" }
+    }
+
     /// Deep-thinking substrate the Router escalates to.
     enum DeepSubstrate: String, CaseIterable, Identifiable {
         case piDev, codex, claudeCode
@@ -89,6 +96,10 @@ final class Conversation: ObservableObject {
     @Published var sttLanguage: SttLanguage =
         SttLanguage(rawValue: UserDefaults.standard.string(forKey: "sttLanguage") ?? "") ?? .enUS {
         didSet { UserDefaults.standard.set(sttLanguage.rawValue, forKey: "sttLanguage") }
+    }
+    @Published var sttBackend: SttBackend =
+        SttBackend(rawValue: UserDefaults.standard.string(forKey: "sttBackend") ?? "") ?? .apple {
+        didSet { UserDefaults.standard.set(sttBackend.rawValue, forKey: "sttBackend") }
     }
     /// Always-on wake word (continuous on-device Speech).
     @Published var wakeEnabled = UserDefaults.standard.bool(forKey: "wakeEnabled") {
@@ -221,6 +232,7 @@ final class Conversation: ObservableObject {
     /// Always-on mode: one echo-cancelled stream, utterances + instant barge-in.
     private func startContinuous() {
         continuous.localeID = sttLanguage.rawValue
+        continuous.sttMode = sttBackend == .elevenLabs ? .elevenLabs : .apple
         // AEC (voice-processing) breaks the streaming recognizer, so keep it off.
         // Half-duplex avoids self-hearing by muting; barge-in relies on headphones.
         continuous.useAEC = false
@@ -241,8 +253,34 @@ final class Conversation: ObservableObject {
             self.processUtterance(t)
         }
         continuous.onPartial = { [weak self] t in self?.partialText = t }
+        // ElevenLabs mode: each utterance arrives as WAV → transcribe → process.
+        continuous.onUtteranceAudio = { [weak self] wav in
+            guard let self, case .listening = self.state else { return }
+            self.partialText = "…"
+            Task {
+                do {
+                    let text = try await ElevenLabs().transcribe(audio: wav)
+                    self.partialText = text
+                    guard case .listening = self.state else { return }
+                    self.processUtterance(text)
+                } catch {
+                    self.partialText = "⚠︎ \(error.localizedDescription)"
+                }
+            }
+        }
         continuous.start()
         state = .listening
+    }
+
+    func setSttBackend(_ b: SttBackend) {
+        sttBackend = b
+        if conversationActive { continuous.stop(); startContinuous() }
+    }
+
+    /// Transcribe a recorded file via the selected backend (one-shot / learn paths).
+    private func transcribeFile(_ url: URL) async throws -> String {
+        if sttBackend == .elevenLabs { return try await ElevenLabs().transcribe(fileURL: url) }
+        return try await stt.transcribe(fileURL: url, localeID: sttLanguage.rawValue)
     }
 
     /// Toggle echo cancellation live (restarts the continuous listener to apply it).
@@ -297,7 +335,7 @@ final class Conversation: ObservableObject {
                 try recorder.start()
                 try await Task.sleep(nanoseconds: 2_500_000_000)
                 guard let url = recorder.stop() else { state = .idle; return }
-                let p = try await stt.transcribe(fileURL: url, localeID: sttLanguage.rawValue)
+                let p = try await transcribeFile(url)
                 try? FileManager.default.removeItem(at: url)
                 let clean = p.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                 if !clean.isEmpty { wakePhrase = clean }
@@ -449,7 +487,7 @@ final class Conversation: ObservableObject {
         state = .thinking
         let token = turnSeq
         Task {
-            let heard = (try? await stt.transcribe(fileURL: fileURL, localeID: sttLanguage.rawValue)) ?? ""
+            let heard = (try? await transcribeFile(fileURL)) ?? ""
             try? FileManager.default.removeItem(at: fileURL)
             guard token == turnSeq else { return }
             if heard.isEmpty { idleOrRelisten(); return }

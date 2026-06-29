@@ -55,8 +55,16 @@ struct ContentView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
-            .frame(width: 84)
+            .frame(width: 78)
             .help("Speech language (on-device: EN, DE-CH)")
+            Picker("", selection: Binding(
+                get: { convo.sttBackend }, set: { convo.setSttBackend($0) })) {
+                ForEach(Conversation.SttBackend.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(width: 96)
+            .help("Speech-to-text engine")
         }
     }
 

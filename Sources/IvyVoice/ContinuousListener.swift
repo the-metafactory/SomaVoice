@@ -12,11 +12,14 @@ import Speech
 /// in a fresh recognizer for the next utterance. The engine/tap stay up the
 /// whole time (truly always listening); only the recognition request cycles.
 final class ContinuousListener {
+    enum SttMode { case apple, elevenLabs }
+    var sttMode: SttMode = .apple
     var localeID = "en-US"
     var useAEC = true         // voice-processing (echo cancellation) — toggle to diagnose
     let vad = VadDetector()   // set vad.margin / vad.hang from outside
     var onSpeechStart: () -> Void = {}
-    var onUtterance: (String) -> Void = { _ in }
+    var onUtterance: (String) -> Void = { _ in }           // Apple mode: text
+    var onUtteranceAudio: (Data) -> Void = { _ in }        // ElevenLabs mode: captured WAV
     var onLevel: (Float, Float, Float) -> Void = { _, _, _ in }   // (level, threshold, floor)
     var onPartial: (String) -> Void = { _ in }   // live transcript / recognition errors (debug)
 
@@ -34,6 +37,10 @@ final class ContinuousListener {
     private let textLock = NSLock()
     private var latestText = ""
 
+    // ElevenLabs mode: accumulate the utterance's 16k mono samples between onset/offset.
+    private var capturing = false
+    private var captureSamples = [Float]()
+
     var isRunning: Bool { running }
     private(set) var muted = false
 
@@ -43,13 +50,20 @@ final class ContinuousListener {
     func setMuted(_ m: Bool) {
         guard m != muted else { return }
         muted = m
-        if !m, running { vad.reset(); newRecognition() }
+        if !m, running {
+            vad.reset()
+            capturing = false; captureSamples.removeAll()
+            if sttMode == .apple { newRecognition() }
+        }
     }
 
     func start() {
-        guard !running, SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
-        recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeID))
-        guard recognizer?.isAvailable == true else { return }
+        guard !running else { return }
+        if sttMode == .apple {
+            guard SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
+            recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeID))
+            guard recognizer?.isAvailable == true else { return }
+        }
         running = true
         // Rebuild on input/output device changes (e.g. plugging in headphones) —
         // the engine stops and the tap format goes stale otherwise.
@@ -72,9 +86,10 @@ final class ContinuousListener {
             self?.handleBuffer(buf)
         }
         vad.reset()
+        capturing = false; captureSamples.removeAll()
         engine.prepare()
         do { try engine.start() } catch { return }
-        newRecognition()
+        if sttMode == .apple { newRecognition() }
     }
 
     func stop() {
@@ -93,18 +108,52 @@ final class ContinuousListener {
 
     private func handleBuffer(_ buf: AVAudioPCMBuffer) {
         if muted { return }   // half-duplex: don't capture Ivy's own playback
-        // Feed SFSpeech 16k mono — raw 48k engine buffers don't reliably transcribe.
-        if let converted = convertTo16k(buf) { request?.append(converted) } else { request?.append(buf) }
         let db = Self.levelDB(buf)
         let dur = Double(buf.frameLength) / buf.format.sampleRate
+        let converted = convertTo16k(buf)
 
         DispatchQueue.main.async { self.onLevel(db, self.vad.threshold, self.vad.floor) }
+        let ev = vad.feed(db, dt: dur)
 
-        switch vad.feed(db, dt: dur) {
-        case .onset:  DispatchQueue.main.async { self.onSpeechStart() }
-        case .offset: endUtterance()
-        case .none:   break
+        switch sttMode {
+        case .apple:
+            // Stream 16k mono to SFSpeech (raw 48k doesn't reliably transcribe).
+            request?.append(converted ?? buf)
+            switch ev {
+            case .onset:  DispatchQueue.main.async { self.onSpeechStart() }
+            case .offset: endUtterance()
+            case .none:   break
+            }
+        case .elevenLabs:
+            // Capture the utterance's samples; POST the WAV on the closing pause.
+            if ev == .onset {
+                capturing = true; captureSamples.removeAll()
+                DispatchQueue.main.async { self.onSpeechStart() }
+            }
+            if capturing, let c = converted, let ch = c.floatChannelData {
+                captureSamples.append(contentsOf: UnsafeBufferPointer(start: ch[0], count: Int(c.frameLength)))
+            }
+            if ev == .offset {
+                capturing = false
+                let wav = Self.makeWav(captureSamples)
+                captureSamples.removeAll()
+                if wav.count > 64 { DispatchQueue.main.async { self.onUtteranceAudio(wav) } }
+            }
         }
+    }
+
+    /// 16k mono 16-bit PCM WAV from captured float samples.
+    private static func makeWav(_ samples: [Float], sampleRate: Int = 16000) -> Data {
+        var d = Data()
+        let dataSize = samples.count * 2
+        func a32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        func a16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        d.append("RIFF".data(using: .ascii)!); a32(UInt32(36 + dataSize)); d.append("WAVE".data(using: .ascii)!)
+        d.append("fmt ".data(using: .ascii)!); a32(16); a16(1); a16(1)
+        a32(UInt32(sampleRate)); a32(UInt32(sampleRate * 2)); a16(2); a16(16)
+        d.append("data".data(using: .ascii)!); a32(UInt32(dataSize))
+        for s in samples { let c = max(-1, min(1, s)); a16(UInt16(bitPattern: Int16(c * 32767))) }
+        return d
     }
 
     /// Pause after speech → emit the latest transcript, reset, fresh recognizer.
