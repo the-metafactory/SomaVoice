@@ -221,7 +221,9 @@ final class Conversation: ObservableObject {
     /// Always-on mode: one echo-cancelled stream, utterances + instant barge-in.
     private func startContinuous() {
         continuous.localeID = sttLanguage.rawValue
-        continuous.useAEC = bargeIn   // AEC needed only when listening through her speech
+        // AEC (voice-processing) breaks the streaming recognizer, so keep it off.
+        // Half-duplex avoids self-hearing by muting; barge-in relies on headphones.
+        continuous.useAEC = false
         continuous.vad.margin = vadMargin
         continuous.vad.hang = silenceHang
         continuous.onLevel = { [weak self] l, t, f in

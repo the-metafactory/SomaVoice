@@ -142,7 +142,7 @@ struct ContentView: View {
             Toggle("Always-on (barge-in)", isOn: Binding(
                 get: { convo.bargeIn }, set: { convo.setBargeIn($0) }))
                 .font(.caption).toggleStyle(.switch).controlSize(.mini)
-            Text("On = interrupt Ivy by talking (echo-cancelled). Off = half-duplex (she finishes, then listens).")
+            Text("On = interrupt by talking (use headphones — open mic). Off = half-duplex (she finishes, then listens).")
                 .font(.caption2).foregroundStyle(.secondary)
         }
     }
