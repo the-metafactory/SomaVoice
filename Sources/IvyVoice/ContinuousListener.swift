@@ -35,6 +35,16 @@ final class ContinuousListener {
     private var latestText = ""
 
     var isRunning: Bool { running }
+    private(set) var muted = false
+
+    /// Half-duplex gate: while muted, ignore the mic entirely (don't feed STT or
+    /// run VAD) so Ivy's own playback never becomes input. Reopening starts a
+    /// fresh recognizer so no residual (her) words leak into the next turn.
+    func setMuted(_ m: Bool) {
+        guard m != muted else { return }
+        muted = m
+        if !m, running { vad.reset(); newRecognition() }
+    }
 
     func start() {
         guard !running, SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
@@ -82,6 +92,7 @@ final class ContinuousListener {
     // MARK: - audio
 
     private func handleBuffer(_ buf: AVAudioPCMBuffer) {
+        if muted { return }   // half-duplex: don't capture Ivy's own playback
         // Feed SFSpeech 16k mono — raw 48k engine buffers don't reliably transcribe.
         if let converted = convertTo16k(buf) { request?.append(converted) } else { request?.append(buf) }
         let db = Self.levelDB(buf)

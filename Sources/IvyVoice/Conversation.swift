@@ -76,6 +76,7 @@ final class Conversation: ObservableObject {
             } else {
                 wakeListener.stop()
             }
+            updateListenerGate()
         }
     }
     @Published var transcript: [Turn] = []
@@ -207,6 +208,14 @@ final class Conversation: ObservableObject {
     func setBargeIn(_ on: Bool) {
         bargeIn = on
         if conversationActive { continuous.stop(); startContinuous() }
+    }
+
+    /// Half-duplex (barge-in off): mute the listener while Ivy speaks/thinks so it
+    /// never hears itself. Barge-in mode stays open (AEC cancels her voice).
+    private func updateListenerGate() {
+        guard conversationActive, continuous.isRunning else { return }
+        if bargeIn { continuous.setMuted(false); return }
+        if case .listening = state { continuous.setMuted(false) } else { continuous.setMuted(true) }
     }
 
     /// Always-on mode: one echo-cancelled stream, utterances + instant barge-in.
