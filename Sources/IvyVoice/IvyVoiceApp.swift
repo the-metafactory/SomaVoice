@@ -147,18 +147,8 @@ struct ContentView: View {
             }
             Text("Say “\(convo.wakePhrase)” to wake. Learn = say your phrase once (2.5s).")
                 .font(.caption2).foregroundStyle(.secondary)
-            Toggle("Always-on (barge-in)", isOn: Binding(
-                get: { convo.bargeIn }, set: { convo.setBargeIn($0) }))
-                .font(.caption).toggleStyle(.switch).controlSize(.mini)
-            Text("On = interrupt by talking. Off = half-duplex (she finishes, then listens).")
+            Text("Conversation is half-duplex: Ivy answers, then listens. Say “stop” to end.")
                 .font(.caption2).foregroundStyle(.secondary)
-            if convo.bargeIn {
-                Toggle("Echo cancellation (speaker barge-in)", isOn: Binding(
-                    get: { convo.aecEnabled }, set: { convo.setAec($0) }))
-                    .font(.caption2).toggleStyle(.switch).controlSize(.mini)
-                Text("Off = use headphones. On = AEC for speakers — pair with ElevenLabs STT (breaks Apple STT).")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
         }
     }
 

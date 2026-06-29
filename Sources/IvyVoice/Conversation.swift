@@ -108,10 +108,6 @@ final class Conversation: ObservableObject {
     @Published var wakePhrase = UserDefaults.standard.string(forKey: "wakePhrase") ?? "hey ivy" {
         didSet { UserDefaults.standard.set(wakePhrase, forKey: "wakePhrase") }
     }
-    /// Always-on listening with echo-cancelled barge-in (interrupt Ivy by voice).
-    @Published var bargeIn = UserDefaults.standard.object(forKey: "bargeIn") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(bargeIn, forKey: "bargeIn") }
-    }
     /// Hands-free back-and-forth: listen → respond → auto-listen, until toggled off.
     @Published var conversationActive = false
 
@@ -131,10 +127,6 @@ final class Conversation: ObservableObject {
     @Published var micThreshold: Float = -42
     @Published var micFloor: Float = -50
     @Published var partialText = ""   // live continuous transcript / recognition error (debug)
-    /// Echo cancellation (voice-processing) for barge-in. Toggle to diagnose AGC issues.
-    @Published var aecEnabled = UserDefaults.standard.object(forKey: "aecEnabled") as? Bool ?? false {
-        didSet { UserDefaults.standard.set(aecEnabled, forKey: "aecEnabled") }
-    }
 
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
@@ -214,18 +206,10 @@ final class Conversation: ObservableObject {
         startContinuous()          // one reliable capture path for all conversation
     }
 
-    /// Toggle barge-in live — restarts the listener so AEC (on only for barge-in)
-    /// is applied.
-    func setBargeIn(_ on: Bool) {
-        bargeIn = on
-        if conversationActive { continuous.stop(); startContinuous() }
-    }
-
-    /// Half-duplex (barge-in off): mute the listener while Ivy speaks/thinks so it
-    /// never hears itself. Barge-in mode stays open (AEC cancels her voice).
+    /// Half-duplex: mute the listener while Ivy speaks/thinks so it never hears
+    /// itself; open only while actually listening.
     private func updateListenerGate() {
         guard conversationActive, continuous.isRunning else { return }
-        if bargeIn { continuous.setMuted(false); return }
         if case .listening = state { continuous.setMuted(false) } else { continuous.setMuted(true) }
     }
 
@@ -233,21 +217,14 @@ final class Conversation: ObservableObject {
     private func startContinuous() {
         continuous.localeID = sttLanguage.rawValue
         continuous.sttMode = sttBackend == .elevenLabs ? .elevenLabs : .apple
-        // AEC only when explicitly enabled in barge-in mode (the speaker-barge-in
-        // experiment). It breaks Apple's recognizer, so it's meant for ElevenLabs.
-        continuous.useAEC = bargeIn && aecEnabled
+        continuous.useAEC = false   // half-duplex only; AEC breaks recognition
         continuous.vad.margin = vadMargin
         continuous.vad.hang = silenceHang
         continuous.onLevel = { [weak self] l, t, f in
             self?.micLevel = l; self?.micThreshold = t; self?.micFloor = f
         }
-        // Only barge-in mode reacts to speech while Ivy is talking/thinking.
-        continuous.onSpeechStart = { [weak self] in
-            guard let self, self.bargeIn else { return }
-            self.handleSpeechStart()
-        }
-        // Process an utterance only when we're actually listening — in half-duplex
-        // this drops anything captured while she speaks (incl. her own voice).
+        // Process an utterance only when we're actually listening — drops anything
+        // captured while she speaks (incl. her own voice).
         continuous.onUtterance = { [weak self] t in
             guard let self, case .listening = self.state else { return }
             self.processUtterance(t)
@@ -281,29 +258,6 @@ final class Conversation: ObservableObject {
     private func transcribeFile(_ url: URL) async throws -> String {
         if sttBackend == .elevenLabs { return try await ElevenLabs().transcribe(fileURL: url) }
         return try await stt.transcribe(fileURL: url, localeID: sttLanguage.rawValue)
-    }
-
-    /// Toggle echo cancellation live (restarts the continuous listener to apply it).
-    func setAec(_ on: Bool) {
-        aecEnabled = on
-        if bargeIn, conversationActive {
-            continuous.stop()
-            startContinuous()
-        }
-    }
-
-    /// User started talking — if Ivy is speaking or thinking, cut her off (barge-in)
-    /// and invalidate the in-flight turn.
-    private func handleSpeechStart() {
-        switch state {
-        case .speaking, .thinking:
-            turnSeq += 1
-            deepReassure?.cancel()
-            player.stop()
-            state = .listening
-        default:
-            if case .listening = state {} else { state = .listening }
-        }
     }
 
     // MARK: - Wake word

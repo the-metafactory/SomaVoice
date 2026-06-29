@@ -118,12 +118,15 @@ skills and can tolerate the wait — or dispatch that work async to Cortex.
   subscription the CLI uses). Until added, use the Skilled toggle.
 - Fast brain has no Claude Code skills — personality only. Skill work belongs on
   the Skilled brain or an async Cortex dispatch.
-- **Always-on / barge-in (default on)** — a continuous echo-cancelled
-  (`setVoiceProcessingEnabled`) `AVAudioEngine` keeps listening through Ivy's own
-  speech, so you can **interrupt her by talking** (or cut off a deep turn) and she
-  picks up your new utterance. Utterances are segmented by SFSpeech endpointing.
-  Toggle off to fall back to push-style VAD turns. Echo cancellation quality is
-  the make-or-break — works best built-in; headphones make it trivial.
+- **Conversation is half-duplex** — Ivy answers, then listens for the next turn
+  (the mic is muted while she speaks, so she never hears herself). A continuous
+  `AVAudioEngine` captures VAD-segmented utterances; say "stop" / "das war's" to
+  end. (Barge-in / interrupt-by-voice was tried and dropped: Apple's echo
+  cancellation breaks the recognizer, so speaker barge-in isn't viable with this
+  stack — not worth the complexity.)
+- **STT engine: Apple (on-device) or ElevenLabs (Scribe, cloud)** — selectable.
+  Apple is private/local; ElevenLabs is more accurate/multilingual at ~1s/turn
+  network latency. Wake word always uses Apple (always-on spotting can't be cloud).
 - **Wake word (optional, always-on)** — toggle it on and say your phrase (default
   "hey ivy") to start a conversation hands-free. "Learn phrase" records you saying
   it once and stores the transcript as the phrase. Uses continuous on-device
