@@ -132,7 +132,7 @@ final class Conversation: ObservableObject {
     @Published var micFloor: Float = -50
     @Published var partialText = ""   // live continuous transcript / recognition error (debug)
     /// Echo cancellation (voice-processing) for barge-in. Toggle to diagnose AGC issues.
-    @Published var aecEnabled = UserDefaults.standard.object(forKey: "aecEnabled") as? Bool ?? true {
+    @Published var aecEnabled = UserDefaults.standard.object(forKey: "aecEnabled") as? Bool ?? false {
         didSet { UserDefaults.standard.set(aecEnabled, forKey: "aecEnabled") }
     }
 
@@ -233,9 +233,9 @@ final class Conversation: ObservableObject {
     private func startContinuous() {
         continuous.localeID = sttLanguage.rawValue
         continuous.sttMode = sttBackend == .elevenLabs ? .elevenLabs : .apple
-        // AEC (voice-processing) breaks the streaming recognizer, so keep it off.
-        // Half-duplex avoids self-hearing by muting; barge-in relies on headphones.
-        continuous.useAEC = false
+        // AEC only when explicitly enabled in barge-in mode (the speaker-barge-in
+        // experiment). It breaks Apple's recognizer, so it's meant for ElevenLabs.
+        continuous.useAEC = bargeIn && aecEnabled
         continuous.vad.margin = vadMargin
         continuous.vad.hang = silenceHang
         continuous.onLevel = { [weak self] l, t, f in
