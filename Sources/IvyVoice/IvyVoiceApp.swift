@@ -140,9 +140,9 @@ struct ContentView: View {
             Text("Say “\(convo.wakePhrase)” to wake. Learn = say your phrase once (2.5s).")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Always-on (barge-in)", isOn: Binding(
-                get: { convo.bargeIn }, set: { convo.bargeIn = $0 }))
+                get: { convo.bargeIn }, set: { convo.setBargeIn($0) }))
                 .font(.caption).toggleStyle(.switch).controlSize(.mini)
-            Text("Interrupt Ivy by talking (echo-cancelled). Off = push-style turns.")
+            Text("On = interrupt Ivy by talking (echo-cancelled). Off = half-duplex (she finishes, then listens).")
                 .font(.caption2).foregroundStyle(.secondary)
         }
     }
@@ -161,10 +161,6 @@ struct ContentView: View {
                             convo.micLevel > convo.micThreshold ? "SPEECH" : "—"))
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(convo.micLevel > convo.micThreshold ? .green : .secondary)
-
-                Toggle("Echo cancellation (AEC)", isOn: Binding(
-                    get: { convo.aecEnabled }, set: { convo.setAec($0) }))
-                    .font(.caption2).toggleStyle(.switch).controlSize(.mini)
 
                 Text("stt: \(convo.partialText.isEmpty ? "—" : convo.partialText)")
                     .font(.system(.caption2, design: .monospaced))

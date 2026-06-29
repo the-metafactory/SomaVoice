@@ -199,20 +199,36 @@ final class Conversation: ObservableObject {
     private func startConversation() {
         wakeListener.stop()        // conversation owns the mic now
         conversationActive = true
-        if bargeIn { startContinuous() } else { listenCycle() }
+        startContinuous()          // one reliable capture path for all conversation
+    }
+
+    /// Toggle barge-in live — restarts the listener so AEC (on only for barge-in)
+    /// is applied.
+    func setBargeIn(_ on: Bool) {
+        bargeIn = on
+        if conversationActive { continuous.stop(); startContinuous() }
     }
 
     /// Always-on mode: one echo-cancelled stream, utterances + instant barge-in.
     private func startContinuous() {
         continuous.localeID = sttLanguage.rawValue
-        continuous.useAEC = aecEnabled
+        continuous.useAEC = bargeIn   // AEC needed only when listening through her speech
         continuous.vad.margin = vadMargin
         continuous.vad.hang = silenceHang
         continuous.onLevel = { [weak self] l, t, f in
             self?.micLevel = l; self?.micThreshold = t; self?.micFloor = f
         }
-        continuous.onSpeechStart = { [weak self] in self?.handleSpeechStart() }
-        continuous.onUtterance = { [weak self] t in self?.processUtterance(t) }
+        // Only barge-in mode reacts to speech while Ivy is talking/thinking.
+        continuous.onSpeechStart = { [weak self] in
+            guard let self, self.bargeIn else { return }
+            self.handleSpeechStart()
+        }
+        // Process an utterance only when we're actually listening — in half-duplex
+        // this drops anything captured while she speaks (incl. her own voice).
+        continuous.onUtterance = { [weak self] t in
+            guard let self, case .listening = self.state else { return }
+            self.processUtterance(t)
+        }
         continuous.onPartial = { [weak self] t in self?.partialText = t }
         continuous.start()
         state = .listening
@@ -475,10 +491,9 @@ final class Conversation: ObservableObject {
     /// After speaking (or a recoverable error): keep the right listening mode alive.
     private func afterSpeak() {
         if conversationActive {
-            if bargeIn { state = .listening }   // continuous listener is already running
-            else { listenCycle() }
+            state = .listening   // continuous listener is already running
         } else {
-            state = .idle                       // didSet restarts the wake listener
+            state = .idle        // didSet restarts the wake listener
         }
     }
 
