@@ -378,6 +378,11 @@ final class Conversation: ObservableObject {
         brain.warmUp(persona)
     }
 
+    /// Live-apply VAD sliders to the running continuous listener (the long-lived
+    /// detector was set only once at start, so the sliders looked dead).
+    func setVadMargin(_ v: Float) { vadMargin = v; continuous.vad.margin = v }
+    func setSilenceHang(_ v: Double) { silenceHang = v; continuous.vad.hang = v }
+
     /// The Router's escalation target for the current deep-substrate setting.
     private func currentDeep() -> Brain {
         switch deepSubstrate {

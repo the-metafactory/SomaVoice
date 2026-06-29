@@ -172,11 +172,12 @@ struct ContentView: View {
                     .lineLimit(2)
 
                 slider("Voice sensitivity", value: Binding(
-                    get: { Double(convo.vadMargin) }, set: { convo.vadMargin = Float($0) }),
+                    get: { Double(convo.vadMargin) }, set: { convo.setVadMargin(Float($0)) }),
                     range: 3...20, suffix: "\(Int(convo.vadMargin)) dB",
                     help: "dB above the live noise floor that counts as speech. Lower = more sensitive. Auto-calibrates to your mic.")
 
-                slider("End after pause", value: $convo.silenceHang,
+                slider("End after pause", value: Binding(
+                    get: { convo.silenceHang }, set: { convo.setSilenceHang($0) }),
                     range: 0.3...3.0, suffix: String(format: "%.1f s", convo.silenceHang),
                     help: "Silence that ends your turn. Raise if she cuts you off.")
 
