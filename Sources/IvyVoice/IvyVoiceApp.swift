@@ -29,9 +29,7 @@ struct ContentView: View {
             transcriptView
             conversationButton
             talkButton
-            Text("Tap ⌃⌥ (Control+Option) anywhere to start/stop a conversation. Or Talk / Space for one turn.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            hotkeyControls
             wakeControls
             tuning
             footer
@@ -134,6 +132,26 @@ struct ContentView: View {
         .controlSize(.large)
         .keyboardShortcut(.space, modifiers: [])
         .tint(convo.state == .listening ? .red : .accentColor)
+    }
+
+    /// Global ⌃⌥ hotkey is opt-in (needs Accessibility). When not granted, offer a
+    /// button that prompts once — instead of nagging on every launch. When granted,
+    /// just show the usage hint.
+    @ViewBuilder private var hotkeyControls: some View {
+        if convo.globalHotkeyTrusted {
+            Text("Tap ⌃⌥ (Control+Option) anywhere to start/stop a conversation. Or Talk / Space for one turn.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        } else {
+            HStack {
+                Text("Talk or Space for one turn. Want a global ⌃⌥ shortcut?")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Button("Enable…") { convo.enableGlobalHotkey() }
+                    .font(.caption2)
+                    .help("Prompts for Accessibility so Control+Option works from any app.")
+            }
+        }
     }
 
     private var wakeControls: some View {

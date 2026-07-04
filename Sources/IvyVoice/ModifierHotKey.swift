@@ -33,7 +33,12 @@ final class ModifierHotKey {
         else if !chordDown, active { active = false; onStop() }
     }
 
-    /// Prompt for Accessibility if not yet trusted (needed for the global monitor).
+    /// Non-prompting trust check — does NOT show the Accessibility dialog. Use to
+    /// decide whether the global monitor can fire without nagging the user.
+    static var isTrusted: Bool { AXIsProcessTrusted() }
+
+    /// Prompt for Accessibility (shows the system dialog). Call ONLY on explicit
+    /// user action — never at launch, or it nags on every launch.
     @discardableResult
     static func requestAccessibility() -> Bool {
         let opt = "AXTrustedCheckOptionPrompt" as CFString

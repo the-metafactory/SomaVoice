@@ -198,14 +198,24 @@ final class Conversation: ObservableObject {
         sight.onCancelled = { [weak self] in self?.afterSpeak() }
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
 
-        // System-wide hotkey: tap Control+Option to toggle hands-free conversation.
+        // System-wide hotkey (Control+Option). Installing the monitors never
+        // prompts; the GLOBAL monitor only delivers events once Accessibility is
+        // granted. We do NOT prompt at launch — that nagged on every launch for an
+        // optional feature. The user opts in via enableGlobalHotkey() when wanted.
         if hotKey == nil {
-            ModifierHotKey.requestAccessibility() // needed for the global monitor
             hotKey = ModifierHotKey(
                 onStart: { [weak self] in self?.toggleConversation() },
                 onStop: {})
         }
     }
+
+    /// Whether the global ⌃⌥ hotkey can actually fire (Accessibility granted).
+    /// Non-prompting — safe to read for UI.
+    var globalHotkeyTrusted: Bool { ModifierHotKey.isTrusted }
+
+    /// Opt-in: prompt once for Accessibility so the global ⌃⌥ hotkey works from
+    /// any app. Only called on explicit user action — never at launch.
+    func enableGlobalHotkey() { ModifierHotKey.requestAccessibility() }
 
     // MARK: - Conversation mode (hands-free)
 
