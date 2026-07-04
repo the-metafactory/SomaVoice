@@ -13,7 +13,7 @@ struct Persona: Identifiable, Hashable {
     static let ivy = Persona(
         id: "ivy",
         name: "Ivy",
-        voiceId: "54Cze5LrTSyLgbO6Fhlc",
+        voiceId: Config.ivyVoiceId,   // ~/.env ELEVENLABS_VOICE_ID (DA-identity fallback) — single source of truth
         preamble: """
         You are Ivy, speaking out loud over a voice interface. Keep replies short, \
         conversational, and natural — one or two sentences unless asked for more. \

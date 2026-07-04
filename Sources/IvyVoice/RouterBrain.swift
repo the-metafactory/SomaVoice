@@ -17,6 +17,8 @@ final class RouterBrain: Brain {
     private let memory = MemoryIndex()
     /// Escalation target — swappable deep substrate (pi.dev / Codex / Claude Code).
     var deep: Brain = PiBrain(lean: false)
+    /// The eye. Wired by Conversation. nil until enrolled; `see` degrades gracefully.
+    var sight: Sense?
 
     /// Spoken bridge while the deep tier works. Wired by Conversation to TTS.
     var onInterim: ((String) -> Void)?
@@ -37,9 +39,9 @@ final class RouterBrain: Brain {
         var hop = 0
         while hop < maxHops {
             hop += 1
-            let msg = try await complete(messages, key: key)
+            let msg = try await complete(messages, key: key, tools: Self.tools)
 
-            // Tool calls? Handle them, then either loop (recall) or hand off (delegate).
+            // Tool calls? Handle them, then either loop (recall) or hand off (delegate/see).
             if let calls = msg["tool_calls"] as? [[String: Any]], !calls.isEmpty {
                 messages.append(msg)  // assistant turn carrying the tool_calls
                 for call in calls {
@@ -58,6 +60,18 @@ final class RouterBrain: Brain {
                     case "recall":
                         let result = await memory.search((args["query"] as? String) ?? text)
                         messages.append(["role": "tool", "tool_call_id": id, "content": result])
+                    case "see":
+                        // Perception is TERMINAL (VISION.md invariants 1 & 2). The glance
+                        // answer is returned directly and the turn ends — it is NEVER fed
+                        // back through the broker, so a confidential frame's local answer
+                        // never leaves the Mac (probe #5), and no `delegate` can run after a
+                        // look: perception structurally cannot originate action (probe #3).
+                        let q = (args["question"] as? String) ?? text
+                        let (answer, note) = await lookAtScreen(question: q)
+                        var stored = answer
+                        if let note { stored += "\n(I looked at the screen: \(note))" }
+                        commit(&history, persona, user: text, assistant: stored)
+                        return answer
                     default:
                         messages.append(["role": "tool", "tool_call_id": id, "content": "unknown tool"])
                     }
@@ -78,14 +92,55 @@ final class RouterBrain: Brain {
         return answer
     }
 
+    // MARK: - Sight
+
+    /// Capture the enrolled window and answer `question` about it. Routes through
+    /// `Sense.describe`, which branches on the window's tier (confidential → local,
+    /// zero egress; open → cloud). This method never decides tier or destination.
+    /// Returns the spoken answer plus a sanitized "app — 5-word intent" note (the
+    /// durable trace is intent, never screen content). All strings are phrased for
+    /// the ear — the answer is spoken directly, not fed back to the router.
+    private func lookAtScreen(question: String) async -> (answer: String, note: String?) {
+        guard let sight else { return ("I can't see your screen right now.", nil) }
+        // Distinguish "nothing enrolled" (nil) from "capture failed" (throw) so the
+        // spoken message is honest and we can see the real error.
+        let frame: SenseFrame?
+        do {
+            frame = try await sight.capture()
+        } catch {
+            return ("I couldn't capture that window — \(error.localizedDescription).", nil)
+        }
+        guard let frame else {
+            return ("There's no window enrolled yet — say 'watch this window' and pick one.", nil)
+        }
+        // Only record the "I looked at the screen" note when the glance actually
+        // produced an answer — a failed describe leaves no misleading trace.
+        do {
+            let answer = try await sight.describe(frame, question: question)
+            let note = "\(frame.appName) — \(Self.fiveWordIntent(question))"
+            return (answer, note)
+        } catch {
+            return ("I couldn't read that just now.", nil)
+        }
+    }
+
+    /// First five words of the question — the durable note is intent, never content.
+    private static func fiveWordIntent(_ q: String) -> String {
+        q.split(whereSeparator: { $0 == " " || $0 == "\n" })
+            .prefix(5)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
     // MARK: - OpenRouter call with tools
 
-    private func complete(_ messages: [[String: Any]], key: String) async throws -> [String: Any] {
+    private func complete(_ messages: [[String: Any]], key: String, tools: [[String: Any]]) async throws -> [String: Any] {
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 500,
             "messages": messages,
-            "tools": Self.tools,
+            "tools": tools,
         ]
         var req = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!)
         req.httpMethod = "POST"
@@ -134,7 +189,9 @@ final class RouterBrain: Brain {
         tool for anything about Jens-Christian's life, projects, people, decisions, or \
         past work. Use the `delegate` tool when the request needs real skills, tools, \
         files, code, the web, calendar, email, or any multi-step work — deep Ivy will \
-        handle it. Prefer answering fast; only delegate when you genuinely cannot.
+        handle it. Prefer answering fast; only delegate when you genuinely cannot. \
+        Use the `see` tool only when he explicitly asks you to look at or read \
+        something on his screen.
         """
     }
 
@@ -148,6 +205,18 @@ final class RouterBrain: Brain {
                     "type": "object",
                     "properties": ["query": ["type": "string", "description": "What to look up"]],
                     "required": ["query"],
+                ],
+            ],
+        ],
+        [
+            "type": "function",
+            "function": [
+                "name": "see",
+                "description": "Look at the window Jens-Christian has enrolled on screen and answer a question about it. Use ONLY when he explicitly asks you to look at / read something on his screen (\"schau\", \"look\", \"see\", \"read this\").",
+                "parameters": [
+                    "type": "object",
+                    "properties": ["question": ["type": "string", "description": "What he wants to know about the screen"]],
+                    "required": ["question"],
                 ],
             ],
         ],
