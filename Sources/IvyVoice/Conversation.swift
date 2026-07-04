@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 
 struct Turn: Identifiable {
     let id = UUID()
@@ -138,6 +139,8 @@ final class Conversation: ObservableObject {
     // Deep substrates the router can escalate to.
     private let deepPi = PiBrain(lean: false)
     private let deepCodex = CodexBrain()
+    // Ivy's eye — enrolled via the system picker, consumed by the router's `see` tool.
+    private let sight = Sight()
     private let stt = SpeechTranscriber()
     private var hotKey: ModifierHotKey?
     private var deepReassure: Task<Void, Never>?
@@ -182,6 +185,15 @@ final class Conversation: ObservableObject {
             Task { @MainActor in self?.beginDeepWait(text) }
         }
         routerBrain.deep = currentDeep() // honor the persisted deep substrate
+        routerBrain.sight = sight        // give the router its eye
+        // After the principal picks a window, speak the tier so consent is audible.
+        sight.onEnrolled = { [weak self] tier in
+            guard let self else { return }
+            let line = tier == .confidential
+                ? "Watching — this stays on your Mac."
+                : "Watching — this one may use the cloud."
+            self.speakLine(line)
+        }
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
 
         // System-wide hotkey: tap Control+Option to toggle hands-free conversation.
@@ -264,7 +276,23 @@ final class Conversation: ObservableObject {
 
     private func onWakeDetected() {
         guard !conversationActive else { return }
+        playWakeChime()   // short audible "I'm listening" ack — covers bare "Hey Ivy"
         startConversation()
+    }
+
+    /// A short, soft chime the moment the wake word activates a conversation, so a
+    /// bare "Hey Ivy" (no command) gets an audible acknowledgement instead of
+    /// silence. Held as a property so the low volume sticks and the sound isn't
+    /// released mid-play.
+    private lazy var wakeChime: NSSound? = {
+        let s = NSSound(named: NSSound.Name("Tink"))
+        s?.volume = 0.25   // soft — an unobtrusive tick, not an alert
+        return s
+    }()
+
+    private func playWakeChime() {
+        wakeChime?.stop()   // restart cleanly if a previous chime is still ringing
+        wakeChime?.play()
     }
 
     /// Start the always-on listener (idempotent; only when enabled and idle).
@@ -463,6 +491,14 @@ final class Conversation: ObservableObject {
             return
         }
 
+        // Enrollment: "watch this window" presents the picker (the pick IS consent).
+        // The tier is carried by the phrase and defaults to confidential.
+        if let tier = enrollmentTier(h) {
+            sight.enroll(tier: tier)   // onEnrolled speaks the confirmation once picked
+            afterSpeak()               // keep the mic alive while he picks
+            return
+        }
+
         state = .thinking
         let token = turnSeq
         let persona = self.persona
@@ -510,6 +546,35 @@ final class Conversation: ObservableObject {
             "hör auf", "hoer auf", "beende", "das war's", "das wars", "danke das war",
         ]
         return phrases.contains { t.contains($0) }
+    }
+
+    /// Recognize a spoken "watch this window" enrollment command and its tier.
+    /// Default (and any bare "watch this window") is confidential — the fail-safe.
+    /// An explicit public phrase marks the window open (cloud-allowed).
+    private func enrollmentTier(_ s: String) -> SenseTier? {
+        let t = s.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " .,!?\n"))
+        let openPhrases = ["watch this public window", "das darf raus", "non-confidential", "non confidential"]
+        if openPhrases.contains(where: { t.contains($0) }) { return .open }
+        let watchPhrases = ["watch this window", "schau auf dieses fenster", "schau dir dieses fenster an"]
+        if watchPhrases.contains(where: { t.contains($0) }) { return .confidential }
+        return nil
+    }
+
+    /// Speak one line and return to the right listening mode (used for the
+    /// enrollment tier confirmation). Never talks over a real answer.
+    private func speakLine(_ text: String) {
+        transcript.append(Turn(speaker: persona.name, text: text))
+        Task { @MainActor in
+            guard let el = try? ElevenLabs(),
+                  let mp3 = try? await el.synthesize(text: text, voiceId: persona.voiceId) else { return }
+            state = .speaking
+            player.play(mp3) { [weak self] in
+                Task { @MainActor in
+                    guard let self, case .speaking = self.state else { return }
+                    self.afterSpeak()
+                }
+            }
+        }
     }
 
     /// Speak a one-off line then go idle (used for the stop confirmation).
