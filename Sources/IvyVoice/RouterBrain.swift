@@ -113,14 +113,24 @@ final class RouterBrain: Brain {
         guard let frame else {
             return ("There's no window enrolled yet — say 'watch this window' and pick one.", nil)
         }
-        let note = "\(frame.appName) — \(Self.fiveWordIntent(question))"
-        let answer = (try? await sight.describe(frame, question: question)) ?? "I couldn't read that just now."
-        return (answer, note)
+        // Only record the "I looked at the screen" note when the glance actually
+        // produced an answer — a failed describe leaves no misleading trace.
+        do {
+            let answer = try await sight.describe(frame, question: question)
+            let note = "\(frame.appName) — \(Self.fiveWordIntent(question))"
+            return (answer, note)
+        } catch {
+            return ("I couldn't read that just now.", nil)
+        }
     }
 
     /// First five words of the question — the durable note is intent, never content.
     private static func fiveWordIntent(_ q: String) -> String {
-        q.split(whereSeparator: { $0 == " " || $0 == "\n" }).prefix(5).joined(separator: " ")
+        q.split(whereSeparator: { $0 == " " || $0 == "\n" })
+            .prefix(5)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     // MARK: - OpenRouter call with tools

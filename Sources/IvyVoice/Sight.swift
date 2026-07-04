@@ -14,11 +14,23 @@ import CoreMedia
 /// `capture()` returns nil and the caller speaks an instruction; it never falls
 /// back to grabbing the screen.
 final class Sight: NSObject, Sense, SCContentSharingPickerObserver {
-    /// The consented window filter + its trust tier, cached at pick-time.
+    /// The consented window filter + its trust tier. Written on the picker's
+    /// callback thread and read from `capture()` (off the main actor), so all
+    /// access is guarded by `stateLock` — no data race on the enrollment.
+    private let stateLock = NSLock()
     private var cachedFilter: SCContentFilter?
-    private var pendingTier: SenseTier = .confidential   // tier for the NEXT pick
     private var cachedTier: SenseTier = .confidential
-    private var cachedAppName: String = "a window"
+    private var cachedAppName = "a window"
+    private var pendingTier: SenseTier = .confidential    // tier + app for the NEXT pick
+    private var pendingAppName = "a window"
+
+    /// Immutable snapshot of the current enrollment, taken under the lock.
+    private struct Enrollment { let filter: SCContentFilter; let tier: SenseTier; let appName: String }
+    private func enrollment() -> Enrollment? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard let filter = cachedFilter else { return nil }
+        return Enrollment(filter: filter, tier: cachedTier, appName: cachedAppName)
+    }
 
     private let ciContext = CIContext()
     private let local = LocalReasoner()
@@ -27,6 +39,9 @@ final class Sight: NSObject, Sense, SCContentSharingPickerObserver {
     /// Fired on the main thread after a successful pick, with the enrolled tier.
     /// Wired by Conversation to speak the tier confirmation.
     var onEnrolled: ((SenseTier) -> Void)?
+    /// Fired on the main thread if the principal dismisses the picker without
+    /// picking, so the caller can drop out of its "picking" state.
+    var onCancelled: (() -> Void)?
 
     /// Max long edge for the uploaded PNG (Haiku 4.5 vision cap).
     private let maxEdge = 1568
@@ -38,10 +53,10 @@ final class Sight: NSObject, Sense, SCContentSharingPickerObserver {
     /// actor — it touches Control Center UI.
     @MainActor
     func enroll(tier: SenseTier) {
-        pendingTier = tier
         // Best-effort app label: the app the principal was looking at when he
         // asked. SCContentFilter exposes no window title; this is metadata only.
-        cachedAppName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "a window"
+        let app = NSWorkspace.shared.frontmostApplication?.localizedName ?? "a window"
+        stateLock.lock(); pendingTier = tier; pendingAppName = app; stateLock.unlock()
 
         let picker = SCContentSharingPicker.shared
         var cfg = SCContentSharingPickerConfiguration()
@@ -57,9 +72,12 @@ final class Sight: NSObject, Sense, SCContentSharingPickerObserver {
     func contentSharingPicker(_ picker: SCContentSharingPicker,
                               didUpdateWith filter: SCContentFilter,
                               for stream: SCStream?) {
+        stateLock.lock()
         cachedFilter = filter
         cachedTier = pendingTier
+        cachedAppName = pendingAppName
         let tier = cachedTier
+        stateLock.unlock()
         NSLog("[Sight] enrolled: tier=%@ %.0fx%.0f scale=%.1f",
               tier == .confidential ? "confidential" : "open",
               filter.contentRect.width, filter.contentRect.height, filter.pointPixelScale)
@@ -67,20 +85,25 @@ final class Sight: NSObject, Sense, SCContentSharingPickerObserver {
     }
 
     func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
-        // No change — a cancelled pick leaves any prior enrollment intact.
+        // A cancelled pick leaves any prior enrollment intact; tell the caller so
+        // it can leave its "picking" state.
+        Task { @MainActor in self.onCancelled?() }
     }
 
     func contentSharingPickerStartDidFailWithError(_ error: Error) {
-        // Picker failed to open; capture() will simply report nothing enrolled.
+        // Picker failed to open; release the caller's "picking" state.
+        NSLog("[Sight] picker failed: %@", error.localizedDescription)
+        Task { @MainActor in self.onCancelled?() }
     }
 
     // MARK: - Sense
 
     func capture() async throws -> SenseFrame? {
-        guard let filter = cachedFilter else {
+        guard let e = enrollment() else {
             NSLog("[Sight] capture: NO filter enrolled")
             return nil                                        // nothing enrolled
         }
+        let filter = e.filter
 
         let cfg = SCStreamConfiguration()
         let scale = CGFloat(filter.pointPixelScale)
@@ -106,8 +129,8 @@ final class Sight: NSObject, Sense, SCContentSharingPickerObserver {
         let png = Self.downscaledPNG(cg, maxEdge: maxEdge, ctx: ciContext)
         NSLog("[Sight] captured ok: png=%d bytes, ocr=%d chars", png.count, ocr.count)
 
-        return SenseFrame(png: png, ocrText: ocr, appName: cachedAppName,
-                          windowTitle: "", tier: cachedTier)
+        return SenseFrame(png: png, ocrText: ocr, appName: e.appName,
+                          windowTitle: "", tier: e.tier)
     }
 
     /// The tier router. The tier check is the first line and has no else-that-leaks:
@@ -170,7 +193,7 @@ final class Sight: NSObject, Sense, SCContentSharingPickerObserver {
 /// so this path needs NO global Screen Recording grant and triggers no monthly
 /// re-nag — unlike `SCScreenshotManager`, which does its own TCC check (VISION.md
 /// invariant 3). Resumes its continuation exactly once (lock-guarded).
-private final class OneFrameGrabber: NSObject, SCStreamOutput {
+private final class OneFrameGrabber: NSObject, SCStreamOutput, SCStreamDelegate {
     enum GrabError: Error { case timeout, noImage }
 
     private let ciContext: CIContext
@@ -191,7 +214,7 @@ private final class OneFrameGrabber: NSObject, SCStreamOutput {
 
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<CGImage, Error>) in
             self.continuation = cont
-            let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+            let stream = SCStream(filter: filter, configuration: config, delegate: self)
             self.stream = stream
             do {
                 let queue = DispatchQueue(label: "ai.metafactory.ivyvoice.sight")
@@ -218,6 +241,12 @@ private final class OneFrameGrabber: NSObject, SCStreamOutput {
             finish(.failure(GrabError.noImage)); return
         }
         finish(.success(cg))
+    }
+
+    // SCStreamDelegate: fail fast if the stream stops (e.g. the window closed
+    // mid-capture) instead of waiting out the timeout.
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        finish(.failure(error))
     }
 
     private func finish(_ result: Result<CGImage, Error>) {

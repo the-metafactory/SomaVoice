@@ -18,14 +18,20 @@ final class LocalReasoner {
     func answer(frame: SenseFrame, question: String) async throws -> String {
         let prompt = Self.prompt(frame: frame, question: question)
 
-        // Primary: Apple Foundation Models — on-device, no key, no network.
+        // Primary: Apple Foundation Models — on-device, no key, no network. On any
+        // failure (unavailable OR a mid-response error) fall through to Ollama;
+        // both are local, so the confidential guarantee holds either way.
         #if canImport(FoundationModels)
         if #available(macOS 26, *) {
             if case .available = SystemLanguageModel.default.availability {
-                let session = LanguageModelSession()
-                let response = try await session.respond(to: prompt)
-                let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty { return text }
+                do {
+                    let session = LanguageModelSession()
+                    let response = try await session.respond(to: prompt)
+                    let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty { return text }
+                } catch {
+                    NSLog("[LocalReasoner] Foundation Models errored, trying Ollama: %@", error.localizedDescription)
+                }
             }
         }
         #endif

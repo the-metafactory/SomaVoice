@@ -192,8 +192,10 @@ final class Conversation: ObservableObject {
             let line = tier == .confidential
                 ? "Watching — this stays on your Mac."
                 : "Watching — this one may use the cloud."
-            self.speakLine(line)
+            self.speakLine(line)   // speakLine → afterSpeak restores the listening state
         }
+        // Picker dismissed/failed without a pick → leave the muted "picking" state.
+        sight.onCancelled = { [weak self] in self?.afterSpeak() }
         brain.warmUp(persona) // no-op for HTTP brains; pays cold start for pi/CLI
 
         // System-wide hotkey: tap Control+Option to toggle hands-free conversation.
@@ -494,8 +496,8 @@ final class Conversation: ObservableObject {
         // Enrollment: "watch this window" presents the picker (the pick IS consent).
         // The tier is carried by the phrase and defaults to confidential.
         if let tier = enrollmentTier(h) {
-            sight.enroll(tier: tier)   // onEnrolled speaks the confirmation once picked
-            afterSpeak()               // keep the mic alive while he picks
+            sight.enroll(tier: tier)   // onEnrolled/onCancelled restore the state below
+            state = .thinking          // mute the mic while the picker is up — no stray capture
             return
         }
 
