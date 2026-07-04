@@ -89,6 +89,17 @@ final class Conversation: ObservableObject {
     }
     @Published var transcript: [Turn] = []
     @Published var persona: Persona = .ivy
+    /// Principal-chosen name for the agent — what she calls herself and how she's
+    /// labeled. Defaults to the persona's own name ("Ivy"); persisted. The wake
+    /// word and voice are configured separately.
+    @Published var agentName: String = UserDefaults.standard.string(forKey: "agentName") ?? Persona.ivy.name {
+        didSet { UserDefaults.standard.set(agentName, forKey: "agentName") }
+    }
+    /// The selected persona under the chosen agent name — use this for every turn.
+    var activePersona: Persona {
+        let n = agentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return persona.renamed(n.isEmpty ? persona.name : n)
+    }
     @Published var brainKind: BrainKind = .router
     @Published var deepSubstrate: DeepSubstrate =
         DeepSubstrate(rawValue: UserDefaults.standard.string(forKey: "deepSubstrate") ?? "") ?? .piDev {
@@ -513,7 +524,7 @@ final class Conversation: ObservableObject {
 
         state = .thinking
         let token = turnSeq
-        let persona = self.persona
+        let persona = self.activePersona   // apply the principal-chosen agent name
         Task {
             do {
                 let el = try ElevenLabs()
@@ -575,6 +586,7 @@ final class Conversation: ObservableObject {
     /// Speak one line and return to the right listening mode (used for the
     /// enrollment tier confirmation). Never talks over a real answer.
     private func speakLine(_ text: String) {
+        let persona = activePersona
         transcript.append(Turn(speaker: persona.name, text: text))
         Task { @MainActor in
             guard let el = try? ElevenLabs(),
@@ -591,6 +603,7 @@ final class Conversation: ObservableObject {
 
     /// Speak a one-off line then go idle (used for the stop confirmation).
     private func speakAndIdle(_ text: String, _ el: ElevenLabs) async throws {
+        let persona = activePersona
         transcript.append(Turn(speaker: persona.name, text: text))
         let mp3 = try await el.synthesize(text: text, voiceId: persona.voiceId)
         state = .speaking

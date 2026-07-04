@@ -10,6 +10,16 @@ struct Persona: Identifiable, Hashable {
     /// Appended to the Claude Code system prompt via `--append-system-prompt`.
     let preamble: String
 
+    /// A copy of this persona under a principal-chosen name. The preamble's
+    /// self-reference is rewritten too, so she introduces herself by the new
+    /// name. Empty or unchanged names return self.
+    func renamed(_ newName: String) -> Persona {
+        let clean = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean != name else { return self }
+        return Persona(id: id, name: clean, voiceId: voiceId,
+                       preamble: preamble.replacingOccurrences(of: name, with: clean))
+    }
+
     static let ivy = Persona(
         id: "ivy",
         name: "Ivy",

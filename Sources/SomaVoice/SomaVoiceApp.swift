@@ -157,6 +157,14 @@ struct ContentView: View {
     private var wakeControls: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
+                Text("Name").font(.caption).foregroundStyle(.secondary)
+                TextField("Ivy", text: Binding(
+                    get: { convo.agentName }, set: { convo.agentName = $0 }))
+                    .textFieldStyle(.roundedBorder).font(.caption).frame(maxWidth: 140)
+                Spacer()
+            }
+            .help("What your agent calls herself. The wake word is set separately below.")
+            HStack {
                 Toggle("Wake word", isOn: Binding(
                     get: { convo.wakeEnabled }, set: { convo.setWakeEnabled($0) }))
                     .font(.caption).toggleStyle(.switch).controlSize(.mini)
