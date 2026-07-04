@@ -37,8 +37,12 @@ cat > "${APP}/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-echo "[4/4] codesigning (ad-hoc)..."
-codesign --force --deep --sign - "${APP}"
+echo "[4/4] codesigning (stable dev identity)..."
+# Stable identity so macOS TCC grants (mic, speech, screen) survive rebuilds.
+# Ad-hoc signing (--sign -) changes the designated requirement every build and
+# silently revokes those grants. SIGN_IDENTITY can override the default cert.
+SIGN_IDENTITY="${SIGN_IDENTITY:-MetaFactoryDev}"
+codesign --force --deep --sign "${SIGN_IDENTITY}" "${APP}"
 
 echo "OK: built ${APP}"
 echo "run:  open ${APP}   (waveform icon appears in the menu bar)"
