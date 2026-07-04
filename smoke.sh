@@ -8,7 +8,7 @@ TXT="${1:-Hi Jens-Christian, this is a smoke test. If you hear this, the chain w
 
 echo "[1/3] pi (Soma Ivy) thinking..."
 t0=$(python3 -c 'import time;print(time.time())')
-REPLY=$(pi -p --mode json --session-id ivy-voice-smoke "$TXT" 2>/dev/null | python3 -c "
+REPLY=$(pi -p --mode json --session-id somavoice-smoke "$TXT" 2>/dev/null | python3 -c "
 import sys,json
 last=''
 for l in sys.stdin:

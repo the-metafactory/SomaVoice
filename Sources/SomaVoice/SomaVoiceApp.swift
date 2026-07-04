@@ -1,11 +1,11 @@
 import SwiftUI
 
 @main
-struct IvyVoiceApp: App {
+struct SomaVoiceApp: App {
     @StateObject private var convo = Conversation()
 
     var body: some Scene {
-        MenuBarExtra("Ivy Voice", systemImage: "waveform.circle") {
+        MenuBarExtra("SomaVoice", systemImage: "waveform.circle") {
             ContentView()
                 .environmentObject(convo)
                 .frame(width: 340)
@@ -39,7 +39,7 @@ struct ContentView: View {
 
     private var header: some View {
         HStack {
-            Text("Ivy Voice").font(.headline)
+            Text("SomaVoice").font(.headline)
             Spacer()
             Picker("", selection: personaBinding) {
                 ForEach(Persona.all) { Text($0.name).tag($0) }

@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP="IvyVoice.app"
+APP="SomaVoice.app"
 
 echo "== signing identity (must be identical across rebuilds) =="
 if [[ -d "$APP" ]]; then
@@ -32,7 +32,7 @@ fi
 echo
 echo "== Screen Recording preflight (toolchain process — indicative only) =="
 # CGPreflightScreenCaptureAccess reports the CALLING process's access. Run here it
-# reflects the swift toolchain, not IvyVoice.app. The authoritative check lives
+# reflects the swift toolchain, not SomaVoice.app. The authoritative check lives
 # inside the app on first capture. This is a smoke reference, not the source of truth.
 swift - <<'SWIFT' 2>/dev/null || echo "  (swift preflight unavailable)"
 import CoreGraphics

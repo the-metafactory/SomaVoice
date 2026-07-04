@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "IvyVoice",
+    name: "SomaVoice",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "IvyVoice",
-            path: "Sources/IvyVoice"
+            name: "SomaVoice",
+            path: "Sources/SomaVoice"
         )
     ]
 )

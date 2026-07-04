@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # create-signing-cert.sh — create a proper self-signed CODE SIGNING identity
-# "MetaFactoryDev" in the login keychain, so ./make-app.sh can sign IvyVoice.app
+# "MetaFactoryDev" in the login keychain, so ./make-app.sh can sign SomaVoice.app
 # with a STABLE identity and macOS TCC grants (mic, speech, screen) survive rebuilds.
 #
 # WHY THIS SCRIPT: a cert created via Certificate Assistant without Certificate

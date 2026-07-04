@@ -1,4 +1,10 @@
 .build/
-IvyVoice.app/
+SomaVoice.app/
 *.xcodeproj
 .DS_Store
+
+# Secrets — never commit env files (keys live in ~/.env, read at runtime).
+.env
+.env.*
+*.env
+!*.env.example

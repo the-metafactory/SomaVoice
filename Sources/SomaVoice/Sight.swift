@@ -217,7 +217,7 @@ private final class OneFrameGrabber: NSObject, SCStreamOutput, SCStreamDelegate 
             let stream = SCStream(filter: filter, configuration: config, delegate: self)
             self.stream = stream
             do {
-                let queue = DispatchQueue(label: "ai.metafactory.ivyvoice.sight")
+                let queue = DispatchQueue(label: "ai.metafactory.somavoice.sight")
                 try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
                 stream.startCapture { [weak self] error in
                     if let error { self?.finish(.failure(error)) }

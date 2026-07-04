@@ -1,4 +1,4 @@
-# Ivy Voice (prototype)
+# SomaVoice (prototype)
 
 A macOS menu-bar app for having an actual spoken conversation with **Ivy** (and
 other cortex assistants). Push-to-talk in, voice out — with the assistant's real
@@ -77,8 +77,8 @@ Other choices:
 ## Build & run
 
 ```bash
-./make-app.sh        # builds release + assembles IvyVoice.app + ad-hoc signs
-open IvyVoice.app    # waveform icon appears in the menu bar
+./make-app.sh        # builds release + assembles SomaVoice.app + ad-hoc signs
+open SomaVoice.app    # waveform icon appears in the menu bar
 ```
 
 First launch prompts for **Microphone** and **Speech Recognition** permission —
@@ -137,7 +137,7 @@ skills and can tolerate the wait — or dispatch that work async to Cortex.
   auto-listens for the next turn until you tap ⌃⌥ again. Plus Talk / Space inside
   the popover for a single turn. The global hotkey needs **Accessibility
   permission** (System Settings → Privacy & Security → Accessibility → enable
-  IvyVoice); the app prompts on first launch.
+  SomaVoice); the app prompts on first launch.
 - VAD thresholds (speech > −30 dBFS, 1.2s silence to end, 15s max) are starting
   values — may need tuning to your mic/room.
 - "Others" ships with Ivy + Echo; Echo uses an ElevenLabs preset voice. Swap in

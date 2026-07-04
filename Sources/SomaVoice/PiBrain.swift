@@ -38,7 +38,7 @@ final class PiBrain: Brain {
 
     func ask(_ text: String, persona: Persona) async throws -> String {
         let voice = "Spoken voice reply: one or two short, natural sentences. No markdown, no lists, no headers — your text is read aloud."
-        var args = ["-p", "--mode", "json", "--session-id", "ivy-voice-\(lean ? "" : "deep-")\(persona.id)"]
+        var args = ["-p", "--mode", "json", "--session-id", "somavoice-\(lean ? "" : "deep-")\(persona.id)"]
 
         if lean {
             // Stripped to minimal context; identity injected as static Soma text.

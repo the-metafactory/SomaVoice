@@ -146,8 +146,8 @@ final class RouterBrain: Brain {
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("https://github.com/the-metafactory/ivy-voice", forHTTPHeaderField: "HTTP-Referer")
-        req.setValue("Ivy Voice", forHTTPHeaderField: "X-Title")
+        req.setValue("https://github.com/the-metafactory/SomaVoice", forHTTPHeaderField: "HTTP-Referer")
+        req.setValue("SomaVoice", forHTTPHeaderField: "X-Title")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, resp) = try await URLSession.shared.data(for: req)
