@@ -1,153 +1,170 @@
-# SomaVoice (prototype)
+# SomaVoice
 
-A macOS menu-bar app for having an actual spoken conversation with **Ivy** (and
-other cortex assistants). Push-to-talk in, voice out — with the assistant's real
-personality and skills, because the brain is a live Claude Code session.
+A macOS menu-bar assistant you talk to out loud, and that can glance at a window on your screen when you ask. Wake word or hotkey in, spoken reply out. The default agent is Ivy; you can rename her.
 
-## How it works
+It has two senses:
 
-```
-mic ──▶ Apple Speech (on-device STT) ──▶ text
-                                          │
-                                          ▼
-                          claude CLI  (cwd = ~/.claude)
-                    └─ loads PAI config: Ivy identity + all skills
-                    └─ --resume <session> for per-persona memory
-                                          │
-                          reply text ◀────┘
-                                          │
-                                          ▼
-                     ElevenLabs TTS (persona voice) ──▶ speaker
-```
+- Voice: a wake word ("hey ivy"), a global hotkey, or a Talk button. Speech-to-text runs on-device, replies come back through ElevenLabs, and a fast router brain either answers directly or hands off to a deeper one.
+- Sight: say "watch this window", pick a window (the pick is the consent), then ask about it. One window, one glance, then it forgets. Windows you mark confidential are answered entirely on your Mac, with no network traffic.
 
-Five selectable brains (toggle in the UI):
+---
 
-- **Router (fast + deep)** — `RouterBrain`, default. One Ivy, two speeds. A fast
-  OpenRouter model answers directly (~2s) and routes itself via tools: `recall`
-  (fast read-only memory grep over `~/.claude` + Soma, returned inline) and
-  `delegate` (hand off to deep Ivy — full pi with skills/tools/memory). On
-  delegate it speaks a short bridge ("let me look into that") so the voice never
-  goes silent during the slow deep turn. System 1 / System 2. Needs
-  `OPENROUTER_API_KEY`. Validated: direct/recall/delegate routing + recall
-  round-trip.
-  - **Deep substrate is selectable** (picker, shown when Router is active):
-    **pi.dev** (`PiBrain` full), **Codex** (`codex exec`, read-only sandbox), or
-    **Claude Code** (`WarmBrain`, full PAI skills). Soma projects Ivy into all
-    three. Note: Codex runs read-only-sandboxed, so it reads files/memory but
-    network tasks (email/calendar) won't run there — use pi.dev or Claude Code
-    for those.
-- **pi.dev lean (Soma Ivy)** — `PiBrain`. Spawns the `pi` agent stripped to a
-  minimal context (`-ne -ns -nc -nt --thinking off`) with Soma-Ivy's identity
-  injected as *static system text* from `~/.soma/profile/*.md` — not the heavy
-  live soma extension. Still the Soma projection of Ivy, but **~1.5-3s warm**
-  (vs ~11.7s for full pi). Pre-warmed at launch to absorb pi's cold start.
-  Memory via per-persona `--session-id`. Routes to any provider (OpenRouter,
-  local Ollama, Codex); no extra key. Validated: identity + memory + latency.
-- **Fast (Anthropic)** — `ApiBrain`, raw Messages API (Haiku), prompt-cached
-  system prompt. ~1-3s/turn. Personality only, no skills. Needs
-  `ANTHROPIC_API_KEY`.
-- **OpenRouter** — `OpenRouterBrain`, OpenAI-compatible, any model behind one
-  key. ~1-3s/turn. Personality only. Needs `OPENROUTER_API_KEY`.
-- **Skilled (PAI)** — `WarmBrain`, a resident `claude` session. Full Claude Code
-  skills + personality, subscription auth (no key). ~20s/turn — see latency note.
+## Requirements
 
-Other choices:
+- macOS 14 or later. macOS 26 (Tahoe) adds on-device Apple Foundation Models, which SomaVoice uses for confidential-tier reasoning. On earlier macOS, use Ollama for that path instead (see [Local reasoning](#local-reasoning-optional)).
+- A Swift 6 toolchain. The Xcode Command Line Tools are enough (`xcode-select --install`).
+- An ElevenLabs account for speech, and an OpenRouter key for the router brain. Everything else is optional.
 
-- **STT = Apple Speech, on-device.** Audio never leaves the machine (privacy),
-  no cloud API scope. Requires macOS Dictation enabled (an MDM policy can
-  disable it; a local whisper.cpp fallback is the alternative — not yet wired).
-  **Language is per-locale (no auto-detect)** — a picker selects it: EN (en-US)
-  and DE-CH (de-CH) run on-device; DE (de-DE) needs a downloaded asset or falls
-  back to server recognition (audio leaves the machine for that locale only).
-- **TTS = ElevenLabs** (`eleven_turbo_v2_5`) in the persona's voice — Ivy uses
-  the voice id from `~/.env`.
-- **Pull, not push.** It only ever speaks in reply to you. Push-to-talk; talk
-  again to interrupt (barge-in stops playback immediately).
+---
 
-## Prerequisites
-
-- macOS 14+, Swift 6 toolchain (Command Line Tools are enough).
-- `claude` CLI installed and logged in.
-- `~/.env` with:
-  ```
-  ELEVENLABS_API_KEY=...
-  ELEVENLABS_VOICE_ID=...        # Ivy's voice
-  ```
-
-## Build & run
+## Setup
 
 ```bash
-./make-app.sh        # builds release + assembles SomaVoice.app + ad-hoc signs
-open SomaVoice.app    # waveform icon appears in the menu bar
+git clone https://github.com/the-metafactory/SomaVoice.git
+cd SomaVoice
 ```
 
-First launch prompts for **Microphone** and **Speech Recognition** permission —
-grant both. Click the menu-bar icon, pick a persona, then **Talk** (or press
-**Space**), speak, and **Stop & Send**.
+### 1. Add your keys
 
-## The latency finding (why two brains)
+SomaVoice reads keys from `~/.env` (and `~/.zshenv`). A menu-bar app launched from Finder doesn't inherit your shell environment, so put them in `~/.env`:
 
-Measured on this machine:
+```bash
+# ~/.env
+ELEVENLABS_API_KEY=...     # required: speech out
+OPENROUTER_API_KEY=...     # required: the router brain
+ELEVENLABS_VOICE_ID=...    # optional: the agent's voice (there's a fallback)
+ANTHROPIC_API_KEY=...      # optional: the "Fast (Anthropic)" brain + open-tier screen vision
+```
 
-| Path | Per-turn latency |
-|------|------------------|
-| `claude -p` cold (fresh process) | ~24-26s |
-| `claude` warm streaming, turn 2/3 | ~20s |
-| Same, with `--model haiku` | no better |
+`~/.env` is git-ignored, so it never lands in the repo.
 
-The ~20s is **not** process startup — a warm resident session still pays it
-every turn. The global `~/.claude` config (large CLAUDE.md, SessionStart +
-prompt-classifier hooks, MCP servers, skill discovery) loads on *every* `claude`
-invocation, regardless of model or cwd. A model swap or warm process can't escape
-it. So the CLI can't be a snappy voice loop.
+### 2. Create a signing identity
 
-The fix is to bypass the CLI harness entirely for conversation: hit a chat API
-directly (no hooks, no MCP, no skill discovery). That's the **Fast** brain. The
-**Skilled** brain keeps the full `claude` session for when you actually want
-skills and can tolerate the wait — or dispatch that work async to Cortex.
+macOS ties microphone, speech, and screen permissions to the app's code signature. Keep the signature stable and you grant those once, then they survive rebuilds. Create a local self-signed identity (this needs your login-keychain password, once):
 
-## Known limitations (prototype)
+```bash
+./create-signing-cert.sh     # creates a "MetaFactoryDev" code-signing cert
+```
 
-- **Deep turns are slow** (~60–90s): when the router delegates a skill task
-  (email, calendar), deep pi explores the skill step-by-step from a cold spawn.
-  Not a hang — the app speaks a bridge then reassures every ~22s while it works,
-  and a watchdog caps it. Repeat calls in the same session are faster (skill
-  already loaded). Future: warm/persistent deep session, or stream pi's progress
-  to voice.
-- Fast brain needs `ANTHROPIC_API_KEY` in `~/.env` (separate from the
-  subscription the CLI uses). Until added, use the Skilled toggle.
-- Fast brain has no Claude Code skills — personality only. Skill work belongs on
-  the Skilled brain or an async Cortex dispatch.
-- **Conversation is half-duplex** — Ivy answers, then listens for the next turn
-  (the mic is muted while she speaks, so she never hears herself). A continuous
-  `AVAudioEngine` captures VAD-segmented utterances; say "stop" / "das war's" to
-  end. (Barge-in / interrupt-by-voice was tried and dropped: Apple's echo
-  cancellation breaks the recognizer, so speaker barge-in isn't viable with this
-  stack — not worth the complexity.)
-- **STT engine: Apple (on-device) or ElevenLabs (Scribe, cloud)** — selectable.
-  Apple is private/local; ElevenLabs is more accurate/multilingual at ~1s/turn
-  network latency. Wake word always uses Apple (always-on spotting can't be cloud).
-- **Wake word (optional, always-on)** — toggle it on and say your phrase (default
-  "hey ivy") to start a conversation hands-free. "Learn phrase" records you saying
-  it once and stores the transcript as the phrase. Uses continuous on-device
-  `SFSpeechRecognizer` (needs Dictation enabled; holds the mic while idle). Say
-  "stop" / "das war's" to end a conversation by voice.
-- **Tap ⌃⌥ (Control+Option) anywhere to start/stop a hands-free conversation** —
-  Ivy listens, VAD ends each utterance on a ~1.2s pause, she responds, then
-  auto-listens for the next turn until you tap ⌃⌥ again. Plus Talk / Space inside
-  the popover for a single turn. The global hotkey needs **Accessibility
-  permission** (System Settings → Privacy & Security → Accessibility → enable
-  SomaVoice); the app prompts on first launch.
-- VAD thresholds (speech > −30 dBFS, 1.2s silence to end, 15s max) are starting
-  values — may need tuning to your mic/room.
-- "Others" ships with Ivy + Echo; Echo uses an ElevenLabs preset voice. Swap in
-  the real cortex assistant voices and wire persona → cortex dispatch later.
-- STT needs macOS Dictation enabled. A local whisper.cpp fallback (you already
-  have `whisper` + ggml models installed) would remove that dependency.
+### 3. Build
 
-## Next steps
+```bash
+./make-app.sh                # builds a release, assembles SomaVoice.app, signs it
+open SomaVoice.app           # a waveform icon appears in the menu bar
+```
 
-- Stream API replies sentence-by-sentence into TTS for lower perceived latency.
-- Persona → Cortex dispatch envelope when a turn produces real work.
-- Earcons for listening/thinking states; configurable hotkey binding.
-- whisper.cpp STT fallback (no Dictation dependency, fully local).
+To sign with a different identity, set `SIGN_IDENTITY=...` before running `make-app.sh`.
+
+### 4. Grant permissions on first launch
+
+- Microphone and Speech Recognition are prompted on first launch. Grant both.
+- Screen Recording isn't needed. Sight captures through the system window picker, which authorizes each pick on its own.
+- Accessibility is only for the global ⌃⌥ hotkey. It's off by default; turn it on from the menu when you want it (see [The global hotkey](#the-global-hotkey-optional)).
+
+That's it. Click the menu-bar icon and press Talk (or Space) to say something.
+
+---
+
+## Configuration
+
+Everything below is optional. SomaVoice runs on the two required keys alone, and most settings live in the menu-bar popover.
+
+### Keys
+
+| Key | Needed for | Required? |
+|-----|-----------|-----------|
+| `ELEVENLABS_API_KEY` | Speech out (TTS) | Yes |
+| `OPENROUTER_API_KEY` | The router brain and its fast reflex tier | Yes |
+| `ELEVENLABS_VOICE_ID` | The agent's voice | No (has a fallback) |
+| `ANTHROPIC_API_KEY` | The "Fast (Anthropic)" brain and open-tier screen vision | No |
+| `OPENAI_API_KEY`, `GEMINI_API_KEY` | Passed through to the deep brains if they use them | No |
+
+### Brains
+
+Pick a brain in the popover. Each one trades speed for depth:
+
+- Router (fast + deep) is the default. A fast model answers directly and routes itself: `recall` for a quick memory lookup, `delegate` to hand a real task to a deeper agent. Needs `OPENROUTER_API_KEY`.
+- pi.dev lean runs the `pi` agent with a light Soma-Ivy identity, warm in a couple of seconds. No extra key.
+- Fast (Anthropic) hits the Messages API directly. Personality, no skills. Needs `ANTHROPIC_API_KEY`.
+- OpenRouter gives you any model behind one key. Personality, no skills.
+- Skilled (PAI) is a full `claude` session with all skills. Slower, and it uses your subscription.
+
+When Router is active, a second picker chooses the deep substrate it hands off to: pi.dev, Codex, or Claude Code. The `pi`, `codex`, and `claude` CLIs need to be installed and logged in for the brains that use them.
+
+### Speech-to-text
+
+Apple (on-device) keeps audio on your Mac. It needs macOS Dictation enabled. EN and DE-CH run on-device; DE may fall back to server recognition. ElevenLabs (Scribe) is the cloud option: more accurate and multilingual, with about a second of network latency. The wake word always uses Apple on-device recognition.
+
+### The agent's name and voice
+
+Type a name in the popover to change what she calls herself and how she's labeled. The name is saved between launches. Her voice comes from `ELEVENLABS_VOICE_ID` in `~/.env`, and the wake word is set separately, so renaming her doesn't touch either.
+
+### Wake word
+
+Turn on the wake word and say your phrase (default "hey ivy") to start a conversation hands-free. "Learn phrase" records you saying it once and stores that as the phrase. Say "stop" or "das war's" to end a conversation.
+
+### The global hotkey (optional)
+
+Tapping ⌃⌥ (Control+Option) anywhere can start or stop a hands-free conversation, but that needs Accessibility permission. It's off by default and never prompts on its own. When you want it, click "Enable…" next to the hotkey hint in the popover, which asks for the grant once. Until then, use the wake word or the Talk button.
+
+### Local reasoning (optional)
+
+Confidential windows (see [Sight](#sight)) are answered without any network call, using a local model. On macOS 26 with Apple Intelligence enabled, that's Apple Foundation Models, with nothing to install. The fallback, and the only local option before macOS 26, is Ollama:
+
+```bash
+brew install ollama
+ollama serve
+ollama pull llama3.2
+```
+
+SomaVoice talks to it at `localhost:11434`. If neither is available, a confidential glance tells you so rather than reaching for the cloud.
+
+### Voice-activity tuning
+
+Under "VAD tuning" you can set how far above the noise floor counts as speech, the pause that ends a turn, and the maximum turn length. The defaults suit a quiet room. Adjust them for your mic.
+
+---
+
+## Using it
+
+### Talking
+
+Start a turn with the wake word, the ⌃⌥ hotkey (if you enabled it), or the Talk button (Space also works) for a single turn. The conversation is half-duplex: she answers, then listens for your next turn. Say "stop" to end.
+
+### Sight
+
+1. Say "watch this window." The system picker opens; click the window you want her to see. She confirms out loud.
+2. Ask about it, for example "what does it say?". She captures that one window, reads it, answers, and forgets it.
+
+A watched window is confidential by default, answered on your Mac with zero network egress. To let a window use the cloud for a better answer, enroll it with "watch this public window" (or "das darf raus").
+
+---
+
+## How sight stays private
+
+Confidential windows never leave the Mac. They're read with on-device OCR and answered by a local model, so the frame and its text make no network call. Only windows you explicitly mark public may use the cloud, and those go straight to Anthropic.
+
+You always choose what she sees. Capture is only ever the single window you pick in the system picker; there's no whole-screen capture anywhere in the app.
+
+Nothing is written to disk. The frame lives in memory for the length of the turn, then it's gone.
+
+And screen text can't act. Whatever she reads on screen is treated as data, not instructions, so a glance can describe something but can't trigger an action.
+
+---
+
+## Troubleshooting
+
+- Mic or speech re-prompts after a rebuild. This shouldn't happen with a stable signing identity; if it does, the signature changed. Check it with `./check-tcc.sh`.
+- A confidential glance says it can't answer locally. Enable Apple Intelligence (macOS 26), or run `ollama serve` with a pulled model. It won't fall back to the cloud for a confidential window.
+- She doesn't speak. Check `ELEVENLABS_API_KEY`.
+- The router errors out. Check `OPENROUTER_API_KEY`.
+- Public-tier glances fail. Those need `ANTHROPIC_API_KEY`.
+
+## Project layout
+
+```
+Sources/SomaVoice/     Swift sources (SomaVoiceApp entry point)
+make-app.sh            build + assemble + sign SomaVoice.app
+create-signing-cert.sh create the local code-signing identity
+check-tcc.sh           report the app's signature and permission state
+```
